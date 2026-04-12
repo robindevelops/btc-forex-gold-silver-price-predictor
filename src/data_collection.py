@@ -30,11 +30,16 @@ def fetch_bitcoin_data(days=DEFAULT_HISTORY_DAYS):
     response = requests.get(url, params=params)
     data = response.json()
     
-    # Extract prices (format: [timestamp, price])
+    # Extract prices and volumes
     prices = data['prices']
+    volumes = data['total_volumes']
     
-    # Create DataFrame
-    df = pd.DataFrame(prices, columns=['timestamp', 'price'])
+    # Create DataFrames
+    df_prices = pd.DataFrame(prices, columns=['timestamp', 'price'])
+    df_volumes = pd.DataFrame(volumes, columns=['timestamp', 'volume'])
+    
+    # Merge on timestamp
+    df = pd.merge(df_prices, df_volumes, on='timestamp')
     
     # Convert timestamp (ms) to datetime
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -75,8 +80,8 @@ def fetch_forex_data(asset_name):
     df = df.reset_index()
     
     # Clean and standardize
-    df = df[['Date', 'Close']]
-    df.columns = ['timestamp', 'price']
+    df = df[['Date', 'Close', 'Volume']]
+    df.columns = ['timestamp', 'price', 'volume']
     
     # Ensure datetime format (removing timezone if present for CSV compatibility)
     df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
@@ -92,6 +97,7 @@ def verify_data(df, asset_name):
     print(f"\n--- Verification: {asset_name} ---")
     print(f"Date Range: {df['timestamp'].min()} to {df['timestamp'].max()}")
     print(f"Price Range: ${df['price'].min():.2f} - ${df['price'].max():.2f}")
+    print(f"Average Volume: {df['volume'].mean():,.2f}")
     print(f"Null Values:\n{df.isnull().sum()}")
     print(f"Shape: {df.shape}")
 
