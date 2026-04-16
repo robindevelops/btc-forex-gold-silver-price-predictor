@@ -11,9 +11,9 @@ MODELS_DIR = os.path.join(BASE_DIR, 'data', 'models')
 # Data sources configuration
 ASSET_CONFIG = {
     'Bitcoin': {
-        'id': 'bitcoin',
+        'ticker': 'BTC-USD',
         'type': 'crypto',
-        'source': 'coingecko',
+        'source': 'yfinance',
         'filename': 'bitcoin_data.csv'
     },
     'Gold': {

@@ -6,50 +6,10 @@ from config import RAW_DATA_DIR, ASSET_CONFIG, DEFAULT_HISTORY_DAYS
 
 def fetch_bitcoin_data(days=DEFAULT_HISTORY_DAYS):
     """
-    Fetches historical Bitcoin data from CoinGecko API.
-    
-    API Endpoint: https://api.coingecko.com/api/v3/coins/bitcoin/market_chart
-    Params: vs_currency=usd, days=days
-    
-    TODO (Developer): 
-    1. Make the requests call to the endpoint.
-    2. Extract the 'prices' array from the JSON response.
-    3. Convert to a Pandas DataFrame with columns ['timestamp', 'price'].
-    4. Convert 'timestamp' to datetime format.
-    5. Save the DataFrame to CSV in RAW_DATA_DIR.
-    6. Return the DataFrame.
+    Fetches historical Bitcoin data using yFinance (defaults to 3 years),
+    bypassing the free CoinGecko 365-day API limitation.
     """
-    print(f"Fetching Bitcoin data for the last {days} days...")
-    url = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
-    params = {
-        'vs_currency': 'usd',
-        'days': days,
-        'interval': 'daily'
-    }
-    
-    response = requests.get(url, params=params)
-    data = response.json()
-    
-    # Extract prices and volumes
-    prices = data['prices']
-    volumes = data['total_volumes']
-    
-    # Create DataFrames
-    df_prices = pd.DataFrame(prices, columns=['timestamp', 'price'])
-    df_volumes = pd.DataFrame(volumes, columns=['timestamp', 'volume'])
-    
-    # Merge on timestamp
-    df = pd.merge(df_prices, df_volumes, on='timestamp')
-    
-    # Convert timestamp (ms) to datetime
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    
-    # Save raw data to CSV
-    filename = os.path.join(RAW_DATA_DIR, ASSET_CONFIG['Bitcoin']['filename'])
-    df.to_csv(filename, index=False)
-    
-    print(f"Data saved to {filename}")
-    return df
+    return fetch_forex_data('Bitcoin')
 
 def fetch_gold_data():
     """Fetches historical Gold data using yFinance."""
@@ -105,7 +65,7 @@ if __name__ == "__main__":
     print("Starting data collection pipeline...")
     
     # 1. Bitcoin
-    df_btc = fetch_bitcoin_data(days=365)
+    df_btc = fetch_bitcoin_data(days=DEFAULT_HISTORY_DAYS)
     verify_data(df_btc, "Bitcoin")
     
     # 2. Gold

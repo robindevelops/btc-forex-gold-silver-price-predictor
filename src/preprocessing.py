@@ -1,6 +1,9 @@
 import pandas as pd
+import numpy as np
 import os
-from config import RAW_DATA_DIR, PROCESSED_DATA_DIR, ASSET_CONFIG
+import joblib
+from sklearn.preprocessing import MinMaxScaler
+from config import RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG
 
 class DataCleaner:
     """
@@ -177,11 +180,153 @@ class DataCleaner:
         self.df.index.name = 'timestamp'
         print(f"Final cleaned count: {len(self.df)} rows.")
 
+    def normalize_and_split(self, train_ratio=0.70, val_ratio=0.15):
+        """
+        Chronological split: 70% train, 15% val, 15% test.
+        No random shuffle — time series must stay in order.
+        Fits MinMaxScaler on training set ONLY to prevent data leakage.
+        """
+        if self.df is None:
+            return
+
+        n = len(self.df)
+        feature_cols = list(self.df.columns)
+
+        train_end = int(n * train_ratio)
+        val_end = int(n * (train_ratio + val_ratio))
+
+        train_df = self.df.iloc[:train_end].copy()
+        val_df = self.df.iloc[train_end:val_end].copy()
+        test_df = self.df.iloc[val_end:].copy()
+
+        # Print split sizes and date ranges for verification
+        print(f"\n{'='*50}")
+        print(f"Chronological Split for {self.asset_name}:")
+        print(f"  Train: {len(train_df)} rows | {train_df.index.min().date()} → {train_df.index.max().date()}")
+        print(f"  Val:   {len(val_df)} rows | {val_df.index.min().date()} → {val_df.index.max().date()}")
+        print(f"  Test:  {len(test_df)} rows | {test_df.index.min().date()} → {test_df.index.max().date()}")
+        print(f"{'='*50}\n")
+
+        # Fit scaler on TRAINING data only — never on val/test
+        self.scaler = MinMaxScaler(feature_range=(0, 1))
+        self.scaler.fit(train_df[feature_cols])
+
+        # Transform all three sets using the train-fitted scaler
+        self.train_scaled = pd.DataFrame(
+            self.scaler.transform(train_df[feature_cols]),
+            columns=feature_cols, index=train_df.index
+        )
+        self.val_scaled = pd.DataFrame(
+            self.scaler.transform(val_df[feature_cols]),
+            columns=feature_cols, index=val_df.index
+        )
+        self.test_scaled = pd.DataFrame(
+            self.scaler.transform(test_df[feature_cols]),
+            columns=feature_cols, index=test_df.index
+        )
+
+        print("MinMaxScaler fitted on training data only (no data leakage).")
+
     def save_data(self):
-        """Saves the cleaned dataframe to the processed directory."""
-        if self.df is not None:
-            self.df.to_csv(self.processed_path)
-            print(f"Saved processed data to {self.processed_path}")
+        """
+        Saves:
+        1. Unscaled features CSV (for exploration)
+        2. Scaled train / val / test CSVs
+        3. Scaler object (.pkl) for inverse-transforming predictions
+        """
+        if self.df is None:
+            return
+
+        # 1. Save unscaled features
+        self.df.to_csv(self.processed_path)
+        print(f"Saved unscaled features to {self.processed_path}")
+
+        # 2. Save scaled train / val / test
+        base = self.processed_path.replace('_features.csv', '')
+        train_path = f"{base}_train_scaled.csv"
+        val_path = f"{base}_val_scaled.csv"
+        test_path = f"{base}_test_scaled.csv"
+
+        self.train_scaled.to_csv(train_path)
+        self.val_scaled.to_csv(val_path)
+        self.test_scaled.to_csv(test_path)
+        print(f"Saved scaled train to {train_path}")
+        print(f"Saved scaled val   to {val_path}")
+        print(f"Saved scaled test  to {test_path}")
+
+        # 3. Save scaler object for inverse-transform at prediction time
+        scaler_filename = os.path.basename(base) + '_scaler.pkl'
+        scaler_path = os.path.join(MODELS_DIR, scaler_filename)
+        joblib.dump(self.scaler, scaler_path)
+        print(f"Saved scaler to {scaler_path}")
+
+def create_sequences(data, seq_len=60, target_col='price'):
+    """
+    Sliding window sequence creator for LSTM input.
+
+    Takes a scaled DataFrame and produces:
+      X: (samples, seq_len, features) — the lookback window
+      y: (samples, 1)                 — the next-day target price
+
+    For each sample i, X[i] = rows[i : i+seq_len] (all features),
+    and y[i] = the 'price' value at row[i+seq_len].
+    """
+    target_idx = list(data.columns).index(target_col)
+    values = data.values  # convert to numpy
+
+    X, y = [], []
+    for i in range(len(values) - seq_len):
+        X.append(values[i : i + seq_len])          # shape: (seq_len, features)
+        y.append(values[i + seq_len, target_idx])   # next-day price
+
+    return np.array(X), np.array(y).reshape(-1, 1)
+
+
+def save_asset_sequences(asset_name, seq_len=60):
+    """Generates and saves X, y numpy sequences to disk (.npy) for a given asset."""
+    prefix = ASSET_CONFIG[asset_name].get('filename').split('_')[0]
+    if asset_name == 'Bitcoin':
+        prefix = 'btc'
+
+    train_path = os.path.join(PROCESSED_DATA_DIR, f"{prefix}_train_scaled.csv")
+    val_path   = os.path.join(PROCESSED_DATA_DIR, f"{prefix}_val_scaled.csv")
+    test_path  = os.path.join(PROCESSED_DATA_DIR, f"{prefix}_test_scaled.csv")
+
+    train_df = pd.read_csv(train_path, index_col='timestamp', parse_dates=True)
+    val_df   = pd.read_csv(val_path,   index_col='timestamp', parse_dates=True)
+    test_df  = pd.read_csv(test_path,  index_col='timestamp', parse_dates=True)
+
+    X_train, y_train = create_sequences(train_df, seq_len=seq_len)
+    X_val,   y_val   = create_sequences(val_df,   seq_len=seq_len)
+    X_test,  y_test  = create_sequences(test_df,  seq_len=seq_len)
+
+    np.save(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_X_train.npy"), X_train)
+    np.save(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_y_train.npy"), y_train)
+    np.save(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_X_val.npy"), X_val)
+    np.save(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_y_val.npy"), y_val)
+    np.save(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_X_test.npy"), X_test)
+    np.save(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_y_test.npy"), y_test)
+    print(f"[{asset_name}] Saved .npy sequences to {PROCESSED_DATA_DIR}")
+
+def load_dataset(asset_name):
+    """
+    Loader helper. 
+    Loads the preprocessed X and y sequence arrays for the specified asset.
+    Returns: X_train, y_train, X_val, y_val, X_test, y_test
+    """
+    prefix = ASSET_CONFIG[asset_name].get('filename').split('_')[0]
+    if asset_name == 'Bitcoin':
+        prefix = 'btc'
+        
+    X_train = np.load(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_X_train.npy"))
+    y_train = np.load(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_y_train.npy"))
+    X_val   = np.load(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_X_val.npy"))
+    y_val   = np.load(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_y_val.npy"))
+    X_test  = np.load(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_X_test.npy"))
+    y_test  = np.load(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_y_test.npy"))
+    
+    return X_train, y_train, X_val, y_val, X_test, y_test
+
 
 def run_cleaning_pipeline():
     """Execution script for all configured assets."""
@@ -191,8 +336,12 @@ def run_cleaning_pipeline():
         cleaner = DataCleaner(asset)
         if cleaner.load_data():
             cleaner.clean_data()
+            cleaner.normalize_and_split(train_ratio=0.70, val_ratio=0.15)
             cleaner.save_data()
-            print(f"Successfully processed {asset}.\n" + "-"*30)
+            # Generate and save LSTM sequences automatically
+            save_asset_sequences(asset, seq_len=60)
+            print(f"Successfully processed {asset} entirely.\n" + "-"*30)
+
 
 if __name__ == "__main__":
     run_cleaning_pipeline()
