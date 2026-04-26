@@ -38,66 +38,93 @@ def build_sequences(seq_len):
     val_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, 'btc_val_scaled.csv'), index_col='timestamp', parse_dates=True)
     test_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, 'btc_test_scaled.csv'), index_col='timestamp', parse_dates=True)
 
-    X_train, y_train = create_sequences(train_df, seq_len=seq_len)
-    X_val, y_val = create_sequences(val_df, seq_len=seq_len)
-    X_test, y_test = create_sequences(test_df, seq_len=seq_len)
+    L_train = len(train_df)
+    L_val = len(val_df)
+    
+    # 1. Create sequences continuously to avoid losing data at the boundaries
+    full_df = pd.concat([train_df, val_df, test_df])
+    X, y = create_sequences(full_df, seq_len=seq_len)
+    
+    # 2. Split indices
+    split_1 = L_train - seq_len
+    split_2 = L_train + L_val - seq_len
+    
+    X_train, y_train = X[:split_1], y[:split_1]
+    X_val, y_val = X[split_1:split_2], y[split_1:split_2]
+    X_test, y_test = X[split_2:], y[split_2:]
 
-    # Merge train and val
+    # Merge train and val for final retraining
     X_tr = np.concatenate([X_train, X_val], axis=0)
     y_tr = np.concatenate([y_train, y_val], axis=0)
-    return X_tr, y_tr, X_test, y_test
+    
+    return X_train, y_train, X_val, y_val, X_tr, y_tr, X_test, y_test
 
 
 if __name__ == "__main__":
     cfg = BEST_LSTM_CONFIG
     print(f"\n{'='*50}")
-    print("  TRAINING FINAL BTC MODEL")
+    print("  TRAINING FINAL BTC MODEL (UNBIASED)")
     print(f"{'='*50}")
     print(f"  Configuration:")
     for k, v in cfg.items():
         print(f"    {k}: {v}")
     
-    print("\n  Building sequences...")
-    X_train, y_train, X_test, y_test = build_sequences(cfg['seq_len'])
-    print(f"  Train: {X_train.shape}, Test: {X_test.shape}")
+    print("\n  Building continuous sequences...")
+    X_train, y_train, X_val, y_val, X_tr, y_tr, X_test, y_test = build_sequences(cfg['seq_len'])
+    print(f"  Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+    print(f"  Full Train (Train+Val): {X_tr.shape}")
     
     scaler = joblib.load(os.path.join(MODELS_DIR, 'btc_scaler.pkl'))
     n_features = X_train.shape[2]
     
-    print("\n  Building model...")
-    model = build_lstm_model(
-        seq_len=cfg['seq_len'],
-        n_features=n_features,
-        learning_rate=cfg['learning_rate'],
-        lstm_units=cfg['lstm_units'],
-        dense_units=cfg['dense_units'],
-        dropout_rate=cfg['dropout_rate']
+    # --- PHASE 1: Find best epoch on validation set (No data leakage) ---
+    print("\n  Phase 1: Finding optimal epochs via Validation Set...")
+    model_val = build_lstm_model(
+        seq_len=cfg['seq_len'], n_features=n_features,
+        learning_rate=cfg['learning_rate'], lstm_units=cfg['lstm_units'],
+        dense_units=cfg['dense_units'], dropout_rate=cfg['dropout_rate']
     )
     
-    # Save the model natively to .keras but also as .h5
-    ckpt_path_keras = os.path.join(MODELS_DIR, 'btc_lstm_final.keras')
-    ckpt_path_h5 = os.path.join(MODELS_DIR, 'btc_lstm_final.h5')
+    callbacks_val = [
+        EarlyStopping(monitor='val_loss', patience=cfg['patience'], restore_best_weights=True, verbose=0),
+        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7, min_lr=1e-6, verbose=0),
+    ]
     
-    callbacks = [
-        EarlyStopping(monitor='val_loss', patience=cfg['patience'], restore_best_weights=True, verbose=1),
-        ModelCheckpoint(filepath=ckpt_path_keras, monitor='val_loss', save_best_only=True, verbose=1),
-        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7, min_lr=1e-6, verbose=1),
+    history_val = model_val.fit(
+        X_train, y_train, validation_data=(X_val, y_val),
+        epochs=cfg['epochs'], batch_size=cfg['batch_size'],
+        callbacks=callbacks_val, verbose=0
+    )
+    
+    best_epoch = np.argmin(history_val.history['val_loss']) + 1
+    print(f"  Optimal epochs found: {best_epoch} (Early stopping monitored on Val)")
+    
+    # --- PHASE 2: Retrain blindly on full dataset (Train+Val) for best_epoch ---
+    print(f"\n  Phase 2: Retraining on full dataset for {best_epoch} epochs...")
+    model_final = build_lstm_model(
+        seq_len=cfg['seq_len'], n_features=n_features,
+        learning_rate=cfg['learning_rate'], lstm_units=cfg['lstm_units'],
+        dense_units=cfg['dense_units'], dropout_rate=cfg['dropout_rate']
+    )
+    
+    # We use a custom learning rate scheduler to mimic the decay that happened during phase 1
+    # For simplicity in this script, we'll just train with standard ReduceLROnPlateau but monitor 'loss'
+    callbacks_final = [
+        ReduceLROnPlateau(monitor='loss', factor=0.5, patience=7, min_lr=1e-6, verbose=0)
     ]
     
     start_time = datetime.now()
-    history = model.fit(
-        X_train, y_train,
-        validation_data=(X_test, y_test),
-        epochs=cfg['epochs'],
+    model_final.fit(
+        X_tr, y_tr,
+        epochs=best_epoch,
         batch_size=cfg['batch_size'],
-        callbacks=callbacks,
+        callbacks=callbacks_final,
         verbose=0
     )
+    print(f"  Training completed in {(datetime.now() - start_time).total_seconds():.0f}s")
     
-    print(f"\n  Training completed in {(datetime.now() - start_time).total_seconds():.0f}s")
-    
-    # Evaluate
-    y_pred_scaled = model.predict(X_test, verbose=0)
+    # --- EVALUATION ON BLIND TEST SET ---
+    y_pred_scaled = model_final.predict(X_test, verbose=0)
     rmse_s = np.sqrt(mean_squared_error(y_test, y_pred_scaled))
     r2_s = r2_score(y_test, y_pred_scaled)
     
@@ -105,12 +132,16 @@ if __name__ == "__main__":
     y_pred_real = inverse_transform_price(y_pred_scaled, scaler, 0, n_features)
     rmse_usd = np.sqrt(mean_squared_error(y_test_real, y_pred_real))
     
-    print(f"  Final Evaluation:")
+    print(f"\n  Final UNBIASED Evaluation (Test Set):")
     print(f"    RMSE (scaled): {rmse_s:.6f}")
     print(f"    R²:            {r2_s:.6f}")
     print(f"    RMSE (USD):    ${rmse_usd:,.0f}")
     
-    # Also save as h5 per user request
-    model.save(ckpt_path_h5)
+    # Save the model
+    ckpt_path_keras = os.path.join(MODELS_DIR, 'btc_lstm_final.keras')
+    ckpt_path_h5 = os.path.join(MODELS_DIR, 'btc_lstm_final.h5')
+    
+    model_final.save(ckpt_path_keras)
+    model_final.save(ckpt_path_h5)
     print(f"\n  ✅ Model saved to {ckpt_path_keras}")
     print(f"  ✅ Model also saved to {ckpt_path_h5}")
