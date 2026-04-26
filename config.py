@@ -32,3 +32,15 @@ ASSET_CONFIG = {
 
 # Settings mapping
 DEFAULT_HISTORY_DAYS = 365 * 3 # 3 years for decent training data
+
+# Best Hyperparameters (found via Week 5/6 experiments)
+BEST_LSTM_CONFIG = {
+    'seq_len': 30,
+    'lstm_units': 100,
+    'dense_units': 50,
+    'dropout_rate': 0.1,
+    'learning_rate': 0.001,
+    'batch_size': 16,
+    'patience': 20,
+    'epochs': 150
+}

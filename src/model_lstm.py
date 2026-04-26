@@ -3,7 +3,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 
-def build_lstm_model(seq_len, n_features, learning_rate=0.001):
+def build_lstm_model(seq_len, n_features, learning_rate=0.001,
+                     lstm_units=50, dense_units=25, dropout_rate=0.2):
     """
     Build and compile an LSTM model for price prediction.
     
@@ -11,16 +12,19 @@ def build_lstm_model(seq_len, n_features, learning_rate=0.001):
         seq_len (int): Length of the input sequence (time steps).
         n_features (int): Number of features in each time step.
         learning_rate (float): Learning rate for Adam optimizer.
+        lstm_units (int): Number of units in each LSTM layer.
+        dense_units (int): Number of units in the intermediate Dense layer.
+        dropout_rate (float): Dropout rate after each LSTM layer.
         
     Returns:
         tf.keras.models.Sequential: Compiled LSTM model.
     """
     model = Sequential([
-        LSTM(50, return_sequences=True, input_shape=(seq_len, n_features)),
-        Dropout(0.2),
-        LSTM(50, return_sequences=False),
-        Dropout(0.2),
-        Dense(25),
+        LSTM(lstm_units, return_sequences=True, input_shape=(seq_len, n_features)),
+        Dropout(dropout_rate),
+        LSTM(lstm_units, return_sequences=False),
+        Dropout(dropout_rate),
+        Dense(dense_units),
         Dense(1)
     ])
     
