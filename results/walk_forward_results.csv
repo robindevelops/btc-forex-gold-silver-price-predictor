@@ -1,0 +1,4 @@
+asset,n_predictions,rmse,mae,mape,r2,mean_bias,plot_path
+Bitcoin,153,2488.558994775448,1777.5514147221047,2.2975873761907333,0.9443175486101915,-938.0041301822662,/Users/mac/Desktop/crypto-forex-prediction-system/results/btc_walk_forward.png
+Gold,153,125.43018115498815,97.13632606626098,2.0367707819983103,0.8740664480619611,34.171583840009355,/Users/mac/Desktop/crypto-forex-prediction-system/results/gold_walk_forward.png
+Silver,153,18.069855090339686,15.500038371961269,19.146294767263107,-0.8485877651245077,15.499099780145675,/Users/mac/Desktop/crypto-forex-prediction-system/results/silver_walk_forward.png
