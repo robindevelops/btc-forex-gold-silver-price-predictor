@@ -20,7 +20,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import MODELS_DIR, PROCESSED_DATA_DIR
-from src.preprocessing import load_dataset
+from src.data.preprocessing import load_dataset
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')

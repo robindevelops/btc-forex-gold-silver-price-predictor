@@ -17,8 +17,8 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from config import MODELS_DIR, PROCESSED_DATA_DIR
-from src.model_lstm import build_lstm_model
-from src.preprocessing import load_dataset
+from src.models.model_lstm import build_lstm_model
+from src.data.preprocessing import load_dataset
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # suppress TF info logs
 

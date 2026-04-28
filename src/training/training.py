@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
 from config import MODELS_DIR
-from src.model_lstm import build_lstm_model
-from src.preprocessing import load_dataset
+from src.models.model_lstm import build_lstm_model
+from src.data.preprocessing import load_dataset
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from config import PROCESSED_DATA_DIR, MODELS_DIR, BEST_LSTM_CONFIG
-from src.preprocessing import create_sequences
+from src.data.preprocessing import create_sequences
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')

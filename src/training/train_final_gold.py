@@ -20,8 +20,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from config import MODELS_DIR, PROCESSED_DATA_DIR, BEST_LSTM_CONFIG
-from src.model_lstm import build_lstm_model
-from src.preprocessing import create_sequences
+from src.models.model_lstm import build_lstm_model
+from src.data.preprocessing import create_sequences
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
