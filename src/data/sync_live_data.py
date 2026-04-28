@@ -15,12 +15,21 @@ def update_live_data(asset_name):
     and scales it using the EXISTING scaler to prevent data leakage.
     """
     # 1. Fetch from yFinance
-    config = ASSET_CONFIG.get(asset_name)
-    ticker = yf.Ticker(config['ticker'])
-    df = ticker.history(period="3y").reset_index()
-    df = df[['Date', 'Close', 'Volume']]
-    df.columns = ['timestamp', 'price', 'volume']
-    df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
+    try:
+        config = ASSET_CONFIG.get(asset_name)
+        ticker = yf.Ticker(config['ticker'])
+        df = ticker.history(period="3y").reset_index()
+        
+        if df.empty:
+            print(f"yFinance returned empty dataframe for {asset_name}. API might be down or rate-limited.")
+            return False
+            
+        df = df[['Date', 'Close', 'Volume']]
+        df.columns = ['timestamp', 'price', 'volume']
+        df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
+    except Exception as e:
+        print(f"API Error fetching {asset_name}: {str(e)}")
+        return False
     
     # 2. Use DataCleaner to get indicators (SMA, EMA, RSI, MACD, BB)
     cleaner = DataCleaner(asset_name)
