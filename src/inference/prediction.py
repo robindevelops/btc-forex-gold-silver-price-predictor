@@ -44,7 +44,7 @@ class BTCPredictor:
             scaler_path (str): Path to saved .pkl scaler file.
         """
         if model_path is None:
-            model_path = os.path.join(MODELS_DIR, 'btc_lstm_best.keras')
+            model_path = os.path.join(MODELS_DIR, 'btc_lstm_final.keras')
         if scaler_path is None:
             scaler_path = os.path.join(MODELS_DIR, 'btc_scaler.pkl')
 

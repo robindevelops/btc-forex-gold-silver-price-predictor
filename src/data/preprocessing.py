@@ -3,7 +3,7 @@ import numpy as np
 import os
 import joblib
 from sklearn.preprocessing import MinMaxScaler
-from config import RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG
+from config import RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG, BEST_LSTM_CONFIG
 
 class DataCleaner:
     """
@@ -164,6 +164,10 @@ class DataCleaner:
                     self.df[col] = self.df[col].ffill()
                     print(f"Forward-filled {missing_count} missing {col} values for {self.asset_name}.")
 
+        # 4.5 Add Log Returns
+        # Log return = ln(P_t / P_{t-1})
+        self.df['log_return'] = np.log(self.df['price'] / self.df['price'].shift(1))
+        
         # 5. Add Technical Indicators
         self.add_moving_averages()
         self.add_rsi(window=14)
@@ -260,7 +264,7 @@ class DataCleaner:
         joblib.dump(self.scaler, scaler_path)
         print(f"Saved scaler to {scaler_path}")
 
-def create_sequences(data, seq_len=60, target_col='price'):
+def create_sequences(data, seq_len=None, target_col='log_return'):
     """
     Sliding window sequence creator for LSTM input.
 
@@ -271,6 +275,8 @@ def create_sequences(data, seq_len=60, target_col='price'):
     For each sample i, X[i] = rows[i : i+seq_len] (all features),
     and y[i] = the 'price' value at row[i+seq_len].
     """
+    if seq_len is None:
+        seq_len = BEST_LSTM_CONFIG['seq_len']
     target_idx = list(data.columns).index(target_col)
     values = data.values  # convert to numpy
 
@@ -282,8 +288,10 @@ def create_sequences(data, seq_len=60, target_col='price'):
     return np.array(X), np.array(y).reshape(-1, 1)
 
 
-def save_asset_sequences(asset_name, seq_len=60):
+def save_asset_sequences(asset_name, seq_len=None):
     """Generates and saves X, y numpy sequences to disk (.npy) for a given asset."""
+    if seq_len is None:
+        seq_len = BEST_LSTM_CONFIG['seq_len']
     prefix = ASSET_CONFIG[asset_name].get('filename').split('_')[0]
     if asset_name == 'Bitcoin':
         prefix = 'btc'
@@ -339,7 +347,7 @@ def run_cleaning_pipeline():
             cleaner.normalize_and_split(train_ratio=0.70, val_ratio=0.15)
             cleaner.save_data()
             # Generate and save LSTM sequences automatically
-            save_asset_sequences(asset, seq_len=60)
+            save_asset_sequences(asset, seq_len=BEST_LSTM_CONFIG['seq_len'])
             print(f"Successfully processed {asset} entirely.\n" + "-"*30)
 
 

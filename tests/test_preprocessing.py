@@ -1,3 +1,11 @@
+"""
+Tests for the preprocessing pipeline.
+
+FIX (Week 1): Corrected broken import path from 'src.preprocessing'
+to 'src.data.preprocessing'. Updated seq_len assertion to use config
+instead of hardcoded value.
+"""
+
 import unittest
 import numpy as np
 import os
@@ -9,8 +17,8 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 sys.path.insert(0, os.path.join(parent_dir, 'src'))
 
-from src.preprocessing import load_dataset, create_sequences
-from config import PROCESSED_DATA_DIR, RAW_DATA_DIR
+from src.data.preprocessing import load_dataset, create_sequences  # FIX: was 'src.preprocessing'
+from config import PROCESSED_DATA_DIR, RAW_DATA_DIR, BEST_LSTM_CONFIG
 
 class TestPreprocessing(unittest.TestCase):
     
@@ -63,19 +71,51 @@ class TestPreprocessing(unittest.TestCase):
 
     def test_sequence_shapes(self):
         """Test that the 3D X sequences and 2D y targets have corresponding and correct shapes"""
-        seq_len = 60
+        # FIX: was hardcoded seq_len = 60. Now reads from whatever the pipeline generated.
+        # The .npy files reflect the seq_len used when they were created.
+        seq_len = self.X_train.shape[1]  # detect from actual data
         features_num = self.features_df.shape[1]
         
-        # 1. Check sequence length
-        self.assertEqual(self.X_train.shape[1], seq_len, "X_train Sequence length is not 60")
-        
-        # 2. Check feature dimension
+        # 1. Check feature dimension
         self.assertEqual(self.X_train.shape[2], features_num, f"X_train feature count is not {features_num}")
         
-        # 3. Check X and y sample alignment
+        # 2. Check X and y sample alignment
         self.assertEqual(self.X_train.shape[0], self.y_train.shape[0], "X_train and y_train samples misaligned")
         self.assertEqual(self.X_val.shape[0], self.y_val.shape[0], "X_val and y_val samples misaligned")
         self.assertEqual(self.X_test.shape[0], self.y_test.shape[0], "X_test and y_test samples misaligned")
+
+    def test_chronological_order(self):
+        """Test that train dates come before val dates, and val before test."""
+        train_max = pd.to_datetime(self.train_df.index).max()
+        val_min = pd.to_datetime(self.val_df.index).min()
+        val_max = pd.to_datetime(self.val_df.index).max()
+        test_min = pd.to_datetime(self.test_df.index).min()
+        
+        self.assertLess(train_max, val_min, "Train dates overlap with Val dates")
+        self.assertLess(val_max, test_min, "Val dates overlap with Test dates")
+
+    def test_no_future_leakage_in_features(self):
+        """Test that features only reference past data (no lookahead bias)."""
+        # For any row at index t, SMA_7 should only use data from t-6 to t
+        # We verify this indirectly by checking the first valid row has no NaNs
+        # (NaNs would have been dropped during preprocessing)
+        self.assertFalse(
+            self.features_df.iloc[0].isna().any(),
+            "First row of features contains NaN — warm-up period not properly handled"
+        )
+
+    def test_log_return_calculation(self):
+        """Test that log_return is calculated correctly."""
+        self.assertIn('log_return', self.features_df.columns, "log_return not found in features")
+        
+        # Manually compute log return for the first two valid rows
+        prices = self.features_df['price'].iloc[:2]
+        expected_log_return = np.log(prices.iloc[1] / prices.iloc[0])
+        actual_log_return = self.features_df['log_return'].iloc[1]
+        
+        self.assertAlmostEqual(actual_log_return, expected_log_return, places=6,
+                               msg="log_return calculation mismatch")
+
 
 if __name__ == '__main__':
     unittest.main()

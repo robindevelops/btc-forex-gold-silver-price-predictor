@@ -4,6 +4,12 @@ LSTM Dropout Experiment — 0.1 vs 0.2 vs 0.3.
 Uses the best config from previous experiments (100 units, seq_len=30).
 Trains three variants, evaluates each, and appends to experiment_log.csv.
 Then picks the overall best combination across ALL logged experiments.
+
+FIX (Week 1, Day 3): Removed data leakage.
+Previously used validation_data=(X_test, y_test), which contaminated
+hyperparameter selection with the held-out test set. Now uses a proper
+train/val/test separation where val is used for monitoring and early stopping,
+and test is used ONLY for final, post-selection evaluation.
 """
 
 import os
@@ -21,6 +27,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from config import MODELS_DIR, PROCESSED_DATA_DIR
 from src.models.model_lstm import build_lstm_model
 from src.data.preprocessing import create_sequences
+from src.utils.reproducibility import set_all_seeds
 
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
@@ -28,15 +35,23 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
 
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=16):
+def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
     """Inverse-transform scaled price column back to real USD."""
+    if n_features is None:
+        n_features = scaler.n_features_in_
     dummy = np.zeros((len(scaled_values), n_features))
     dummy[:, price_col_idx] = np.array(scaled_values).ravel()
     return scaler.inverse_transform(dummy)[:, price_col_idx]
 
 
 def build_sequences(seq_len=30):
-    """Build train+val merged and test sequences at a given seq_len."""
+    """
+    Build train, val, and test sequences at a given seq_len.
+
+    Returns separate train, val, and test sets — NO merging.
+    Val is used for hyperparameter selection / early stopping.
+    Test is used ONLY for final evaluation after selection.
+    """
     train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, 'btc_train_scaled.csv'),
                            index_col='timestamp', parse_dates=True)
     val_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, 'btc_val_scaled.csv'),
@@ -48,12 +63,11 @@ def build_sequences(seq_len=30):
     X_val, y_val = create_sequences(val_df, seq_len=seq_len)
     X_test, y_test = create_sequences(test_df, seq_len=seq_len)
 
-    X_tr = np.concatenate([X_train, X_val], axis=0)
-    y_tr = np.concatenate([y_train, y_val], axis=0)
-    return X_tr, y_tr, X_test, y_test
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
 
-def run_dropout_experiment(dropout_rate, X_train, y_train, X_test, y_test, scaler,
+def run_dropout_experiment(dropout_rate, X_train, y_train, X_val, y_val,
+                           X_test, y_test, scaler,
                            seq_len=30, lstm_units=100, dense_units=50,
                            learning_rate=0.001, batch_size=16,
                            epochs=150, patience=20):
@@ -63,6 +77,8 @@ def run_dropout_experiment(dropout_rate, X_train, y_train, X_test, y_test, scale
     print(f"\n{'='*60}")
     print(f"  Dropout={dropout_rate}, LSTM={lstm_units}u, seq={seq_len}")
     print(f"{'='*60}")
+
+    set_all_seeds(42)
 
     model = build_lstm_model(
         seq_len, n_features,
@@ -87,7 +103,7 @@ def run_dropout_experiment(dropout_rate, X_train, y_train, X_test, y_test, scale
     start_time = datetime.now()
     history = model.fit(
         X_train, y_train,
-        validation_data=(X_test, y_test),
+        validation_data=(X_val, y_val),  # FIX: was (X_test, y_test) — DATA LEAKAGE
         epochs=epochs, batch_size=batch_size,
         callbacks=callbacks, verbose=0
     )
@@ -95,6 +111,7 @@ def run_dropout_experiment(dropout_rate, X_train, y_train, X_test, y_test, scale
     actual_epochs = len(history.history['loss'])
     best_epoch = np.argmin(history.history['val_loss']) + 1
 
+    # Evaluate on TEST set (post-selection only)
     y_pred_scaled = model.predict(X_test, verbose=0)
     rmse_s = np.sqrt(mean_squared_error(y_test, y_pred_scaled))
     mae_s = mean_absolute_error(y_test, y_pred_scaled)
@@ -131,8 +148,10 @@ def run_dropout_experiment(dropout_rate, X_train, y_train, X_test, y_test, scale
         'mae_usd': round(mae_usd, 2),
         'r2_usd': r2_usd,
         'train_samples': X_train.shape[0],
+        'val_samples': X_val.shape[0],
         'test_samples': X_test.shape[0],
         'checkpoint_path': ckpt_path,
+        'leakage_free': True,  # Flag to distinguish from old contaminated runs
     }
 
 
@@ -142,10 +161,10 @@ if __name__ == "__main__":
     LSTM_UNITS = 100
     DENSE_UNITS = 50
 
-    # --- Load data ---
+    # --- Load data (separate train/val/test — NO merging) ---
     print("Building sequences (seq_len=30)...")
-    X_tr, y_tr, X_te, y_te = build_sequences(SEQ_LEN)
-    print(f"  Train: {X_tr.shape}, Test: {X_te.shape}")
+    X_train, y_train, X_val, y_val, X_test, y_test = build_sequences(SEQ_LEN)
+    print(f"  Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
 
     scaler = joblib.load(os.path.join(MODELS_DIR, 'btc_scaler.pkl'))
 
@@ -154,8 +173,9 @@ if __name__ == "__main__":
     for dr in [0.1, 0.2, 0.3]:
         result = run_dropout_experiment(
             dropout_rate=dr,
-            X_train=X_tr, y_train=y_tr,
-            X_test=X_te, y_test=y_te,
+            X_train=X_train, y_train=y_train,
+            X_val=X_val, y_val=y_val,
+            X_test=X_test, y_test=y_test,
             scaler=scaler,
             seq_len=SEQ_LEN,
             lstm_units=LSTM_UNITS,

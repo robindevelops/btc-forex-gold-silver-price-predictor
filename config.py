@@ -44,3 +44,27 @@ BEST_LSTM_CONFIG = {
     'patience': 20,
     'epochs': 150
 }
+
+# Model status per asset — controls which model is served for predictions.
+# Silver LSTM disabled (Week 1 audit fix): R²=-0.849, 27.5% directional accuracy
+# (below coin-flip). Falls back to Linear Regression until LightGBM is ready (Week 5).
+MODEL_STATUS = {
+    'Bitcoin': {
+        'primary_model': 'lstm',
+        'model_file': 'btc_lstm_final.keras',
+        'status': 'active',
+    },
+    'Gold': {
+        'primary_model': 'lstm',
+        'model_file': 'gold_lstm_final.keras',
+        'status': 'active',
+    },
+    'Silver': {
+        'primary_model': 'linear_regression',  # Fallback: LR beats LSTM for Silver
+        'model_file': 'silver_lstm_final.keras',
+        'status': 'disabled',
+        'reason': 'R²=-0.849, 27.5% directional accuracy (below coin-flip). '
+                  'Disabled in Week 1 audit fix. Re-evaluate after LightGBM (Week 5).',
+    },
+}
+

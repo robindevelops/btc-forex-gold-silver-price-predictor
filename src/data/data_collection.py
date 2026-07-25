@@ -1,5 +1,4 @@
 import pandas as pd
-import requests
 import yfinance as yf
 import os
 from config import RAW_DATA_DIR, ASSET_CONFIG, DEFAULT_HISTORY_DAYS

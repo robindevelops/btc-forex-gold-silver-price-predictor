@@ -28,7 +28,9 @@ def compute_mape(y_true, y_pred):
     non_zero = y_true != 0
     return np.mean(np.abs((y_true[non_zero] - y_pred[non_zero]) / y_true[non_zero])) * 100
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=16):
+def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
+    if n_features is None:
+        n_features = scaler.n_features_in_
     dummy = np.zeros((len(scaled_values), n_features))
     dummy[:, price_col_idx] = np.array(scaled_values).ravel()
     return scaler.inverse_transform(dummy)[:, price_col_idx]

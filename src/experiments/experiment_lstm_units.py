@@ -4,6 +4,12 @@ LSTM Architecture Experiment — 50 vs 100 units.
 Trains two LSTM variants with identical hyperparameters
 (except unit count), evaluates both on the held-out test set,
 and logs results to results/experiment_log.csv.
+
+FIX (Week 1, Day 3): Removed data leakage.
+Previously used validation_data=(X_test, y_test), which contaminated
+hyperparameter selection with the held-out test set. Now uses a proper
+train/val/test separation where val is used for monitoring and early stopping,
+and test is used ONLY for final, post-selection evaluation.
 """
 
 import os
@@ -19,6 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from config import MODELS_DIR, PROCESSED_DATA_DIR
 from src.models.model_lstm import build_lstm_model
 from src.data.preprocessing import load_dataset
+from src.utils.reproducibility import set_all_seeds
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # suppress TF info logs
 
@@ -28,15 +35,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
 
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=16):
+def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
     """Inverse-transform scaled price column back to real USD."""
+    if n_features is None:
+        n_features = scaler.n_features_in_
     dummy = np.zeros((len(scaled_values), n_features))
     dummy[:, price_col_idx] = np.array(scaled_values).ravel()
     inv = scaler.inverse_transform(dummy)
     return inv[:, price_col_idx]
 
 
-def run_experiment(lstm_units, X_train, y_train, X_test, y_test, scaler,
+def run_experiment(lstm_units, X_train, y_train, X_val, y_val,
+                   X_test, y_test, scaler,
                    learning_rate=0.001, batch_size=16, epochs=150, patience=20):
     """
     Train an LSTM variant and return metrics.
@@ -44,7 +54,8 @@ def run_experiment(lstm_units, X_train, y_train, X_test, y_test, scaler,
     Args:
         lstm_units (int): Number of LSTM units per layer.
         X_train, y_train: Training data.
-        X_test, y_test: Test data.
+        X_val, y_val: Validation data (for early stopping / monitoring).
+        X_test, y_test: Test data (for final evaluation ONLY).
         scaler: Fitted MinMaxScaler for inverse transform.
         learning_rate, batch_size, epochs, patience: Hyperparameters.
 
@@ -59,6 +70,8 @@ def run_experiment(lstm_units, X_train, y_train, X_test, y_test, scaler,
     print(f"  Experiment: LSTM units={lstm_units}, dense={dense_units}")
     print(f"  lr={learning_rate}, batch={batch_size}, epochs={epochs}, patience={patience}")
     print(f"{'='*60}")
+
+    set_all_seeds(42)
 
     # Build model
     model = build_lstm_model(
@@ -93,7 +106,7 @@ def run_experiment(lstm_units, X_train, y_train, X_test, y_test, scaler,
     start_time = datetime.now()
     history = model.fit(
         X_train, y_train,
-        validation_data=(X_test, y_test),
+        validation_data=(X_val, y_val),  # FIX: was (X_test, y_test) — DATA LEAKAGE
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
@@ -103,7 +116,7 @@ def run_experiment(lstm_units, X_train, y_train, X_test, y_test, scaler,
     actual_epochs = len(history.history['loss'])
     best_epoch = np.argmin(history.history['val_loss']) + 1
 
-    # Predict (scaled)
+    # Predict (scaled) — on TEST set, post-selection only
     y_pred_scaled = model.predict(X_test, verbose=0)
     rmse_s = np.sqrt(mean_squared_error(y_test, y_pred_scaled))
     mae_s = mean_absolute_error(y_test, y_pred_scaled)
@@ -145,20 +158,19 @@ def run_experiment(lstm_units, X_train, y_train, X_test, y_test, scaler,
         'mae_usd': round(mae_usd, 2),
         'r2_usd': r2_usd,
         'train_samples': X_train.shape[0],
+        'val_samples': X_val.shape[0],
         'test_samples': X_test.shape[0],
         'checkpoint_path': ckpt_path,
+        'leakage_free': True,
     }
 
 
 if __name__ == "__main__":
-    # --- Load data ---
+    # --- Load data (separate train/val/test — NO merging) ---
     print("Loading BTC dataset...")
     X_train, y_train, X_val, y_val, X_test, y_test = load_dataset('Bitcoin')
-
-    # Merge train+val (same strategy as the winning v2 model)
-    X_tr = np.concatenate([X_train, X_val], axis=0)
-    y_tr = np.concatenate([y_train, y_val], axis=0)
-    print(f"  Training samples: {X_tr.shape[0]}, Test samples: {X_test.shape[0]}")
+    print(f"  Training samples: {X_train.shape[0]}, Val: {X_val.shape[0]}, "
+          f"Test samples: {X_test.shape[0]}")
 
     # Load scaler
     scaler = joblib.load(os.path.join(MODELS_DIR, 'btc_scaler.pkl'))
@@ -168,7 +180,8 @@ if __name__ == "__main__":
     for units in [50, 100]:
         result = run_experiment(
             lstm_units=units,
-            X_train=X_tr, y_train=y_tr,
+            X_train=X_train, y_train=y_train,
+            X_val=X_val, y_val=y_val,
             X_test=X_test, y_test=y_test,
             scaler=scaler,
             learning_rate=0.001,

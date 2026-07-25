@@ -47,7 +47,9 @@ def compute_metrics(y_true, y_pred):
     return {'RMSE_USD': rmse, 'MAE_USD': mae, 'R2': r2, 'MAPE': mape}
 
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=16):
+def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
+    if n_features is None:
+        n_features = scaler.n_features_in_
     dummy = np.zeros((len(scaled_values), n_features))
     dummy[:, price_col_idx] = np.array(scaled_values).ravel()
     return scaler.inverse_transform(dummy)[:, price_col_idx]

@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import warnings
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend for saving plots
 import matplotlib.pyplot as plt
@@ -8,6 +9,24 @@ from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLRO
 from config import MODELS_DIR
 from src.models.model_lstm import build_lstm_model
 from src.data.preprocessing import load_dataset
+
+# ⚠️ DEPRECATION WARNING (Week 1 audit fix)
+# This script has a known data leakage issue: it merges train+val (lines 134-135)
+# and uses the held-out test set as validation data (lines 150-152).
+# Any model trained with this script has potentially inflated metrics.
+#
+# USE INSTEAD: src/training/train_final_btc.py
+# That script implements the correct 2-phase approach:
+#   Phase 1: Train on train set, validate on val set, find optimal epochs
+#   Phase 2: Retrain on train+val for that many epochs, evaluate on test
+#
+# This file is preserved for reference only. Do not use for new training.
+warnings.warn(
+    "training.py is DEPRECATED due to data leakage. "
+    "Use train_final_btc.py instead. See docstring for details.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 # Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

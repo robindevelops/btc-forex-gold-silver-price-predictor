@@ -4,6 +4,12 @@ LSTM Sequence Length Experiment — 30 vs 60 vs 90 days.
 Rebuilds sequences at each lookback length from the scaled CSVs,
 trains an LSTM-100u model for each, evaluates on test set,
 and appends results to results/experiment_log.csv.
+
+FIX (Week 1, Day 3): Removed data leakage.
+Previously used validation_data=(X_test, y_test), which contaminated
+hyperparameter selection with the held-out test set. Now uses a proper
+train/val/test separation where val is used for monitoring and early stopping,
+and test is used ONLY for final, post-selection evaluation.
 """
 
 import os
@@ -21,6 +27,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from config import MODELS_DIR, PROCESSED_DATA_DIR
 from src.models.model_lstm import build_lstm_model
 from src.data.preprocessing import create_sequences
+from src.utils.reproducibility import set_all_seeds
 
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
@@ -28,8 +35,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
 
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=16):
+def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
     """Inverse-transform scaled price column back to real USD."""
+    if n_features is None:
+        n_features = scaler.n_features_in_
     dummy = np.zeros((len(scaled_values), n_features))
     dummy[:, price_col_idx] = np.array(scaled_values).ravel()
     inv = scaler.inverse_transform(dummy)
@@ -38,11 +47,15 @@ def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=1
 
 def build_sequences_for_btc(seq_len):
     """
-    Build train+val and test sequences at a given seq_len
+    Build train, val, and test sequences at a given seq_len
     from the saved scaled CSVs.
 
+    Returns separate sets — NO merging of train+val.
+    Val is for hyperparameter selection / early stopping.
+    Test is for final evaluation only.
+
     Returns:
-        X_train_full, y_train_full, X_test, y_test
+        X_train, y_train, X_val, y_val, X_test, y_test
     """
     train_df = pd.read_csv(
         os.path.join(PROCESSED_DATA_DIR, 'btc_train_scaled.csv'),
@@ -61,15 +74,13 @@ def build_sequences_for_btc(seq_len):
     X_val, y_val = create_sequences(val_df, seq_len=seq_len)
     X_test, y_test = create_sequences(test_df, seq_len=seq_len)
 
-    # Merge train + val (same strategy as previous experiments)
-    X_train_full = np.concatenate([X_train, X_val], axis=0)
-    y_train_full = np.concatenate([y_train, y_val], axis=0)
-
-    print(f"  seq_len={seq_len}: train={X_train_full.shape[0]}, test={X_test.shape[0]}, features={X_train_full.shape[2]}")
-    return X_train_full, y_train_full, X_test, y_test
+    print(f"  seq_len={seq_len}: train={X_train.shape[0]}, val={X_val.shape[0]}, "
+          f"test={X_test.shape[0]}, features={X_train.shape[2]}")
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
 
-def run_seq_experiment(seq_len, X_train, y_train, X_test, y_test, scaler,
+def run_seq_experiment(seq_len, X_train, y_train, X_val, y_val,
+                       X_test, y_test, scaler,
                        lstm_units=100, dense_units=50,
                        learning_rate=0.001, batch_size=16,
                        epochs=150, patience=20):
@@ -78,8 +89,10 @@ def run_seq_experiment(seq_len, X_train, y_train, X_test, y_test, scaler,
 
     print(f"\n{'='*60}")
     print(f"  Experiment: seq_len={seq_len}, LSTM={lstm_units}u")
-    print(f"  train={X_train.shape[0]}, test={X_test.shape[0]}")
+    print(f"  train={X_train.shape[0]}, val={X_val.shape[0]}, test={X_test.shape[0]}")
     print(f"{'='*60}")
+
+    set_all_seeds(42)
 
     model = build_lstm_model(
         seq_len, n_features,
@@ -104,7 +117,7 @@ def run_seq_experiment(seq_len, X_train, y_train, X_test, y_test, scaler,
     start_time = datetime.now()
     history = model.fit(
         X_train, y_train,
-        validation_data=(X_test, y_test),
+        validation_data=(X_val, y_val),  # FIX: was (X_test, y_test) — DATA LEAKAGE
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
@@ -114,7 +127,7 @@ def run_seq_experiment(seq_len, X_train, y_train, X_test, y_test, scaler,
     actual_epochs = len(history.history['loss'])
     best_epoch = np.argmin(history.history['val_loss']) + 1
 
-    # Predict
+    # Predict on TEST set (post-selection only)
     y_pred_scaled = model.predict(X_test, verbose=0)
 
     # Scaled metrics
@@ -156,8 +169,10 @@ def run_seq_experiment(seq_len, X_train, y_train, X_test, y_test, scaler,
         'mae_usd': round(mae_usd, 2),
         'r2_usd': r2_usd,
         'train_samples': X_train.shape[0],
+        'val_samples': X_val.shape[0],
         'test_samples': X_test.shape[0],
         'checkpoint_path': ckpt_path,
+        'leakage_free': True,
     }
 
 
@@ -177,12 +192,13 @@ if __name__ == "__main__":
         print(f"  Building sequences with seq_len={sl}")
         print(f"{'#'*60}")
 
-        X_tr, y_tr, X_te, y_te = build_sequences_for_btc(sl)
+        X_train, y_train, X_val, y_val, X_test, y_test = build_sequences_for_btc(sl)
 
         result = run_seq_experiment(
             seq_len=sl,
-            X_train=X_tr, y_train=y_tr,
-            X_test=X_te, y_test=y_te,
+            X_train=X_train, y_train=y_train,
+            X_val=X_val, y_val=y_val,
+            X_test=X_test, y_test=y_test,
             scaler=scaler,
             lstm_units=LSTM_UNITS,
             dense_units=DENSE_UNITS,
@@ -207,7 +223,7 @@ if __name__ == "__main__":
     print("EXPERIMENT COMPARISON — Sequence Length (30 vs 60 vs 90)")
     print(f"{'='*75}")
     cmp = pd.DataFrame(experiments)[
-        ['experiment', 'seq_len', 'train_samples', 'test_samples',
+        ['experiment', 'seq_len', 'train_samples', 'val_samples', 'test_samples',
          'actual_epochs', 'best_epoch', 'train_time_sec',
          'rmse_scaled', 'mae_scaled', 'r2_scaled', 'rmse_usd', 'mae_usd']
     ]
