@@ -26,6 +26,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from tensorflow.keras.models import load_model
+from src.utils.inverse_transform import reconstruct_price
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -45,12 +46,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 def get_prefix(asset):
     return 'btc' if asset == 'Bitcoin' else asset.lower()
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
-    if n_features is None:
-        n_features = scaler.n_features_in_
-    dummy = np.zeros((len(scaled_values), n_features))
-    dummy[:, price_col_idx] = np.array(scaled_values).ravel()
-    return scaler.inverse_transform(dummy)[:, price_col_idx]
+# Replaced by reconstruct_price from src.utils.inverse_transform
 
 def directional_accuracy(y_true, y_pred, y_prev):
     """% of days where the model correctly predicted the direction (up/down)."""
@@ -130,12 +126,16 @@ def eval_lstm(asset):
     total_test = len(test_df)
     
     preds_scaled = []
+    x_seqs = []
     for i in range(total_test):
         target_idx = test_start + i
         x_seq = values[target_idx - seq_len:target_idx].reshape(1, seq_len, n_features)
+        x_seqs.append(x_seq)
         preds_scaled.append(model.predict(x_seq, verbose=0)[0, 0])
     
-    pred_usd = inverse_transform_price(np.array(preds_scaled), scaler, price_col_idx, n_features)
+    x_seqs_arr = np.concatenate(x_seqs, axis=0)
+    target_idx = list(full_df.columns).index('log_return') if 'log_return' in full_df.columns else price_col_idx
+    pred_usd = reconstruct_price(np.array(preds_scaled), x_seqs_arr, scaler, target_idx)
     
     test_actual, prev, _ = get_test_prices(asset)
     metrics = compute_all_metrics(test_actual, pred_usd, prev)
@@ -190,16 +190,20 @@ def eval_baseline(asset, model_type):
     model.fit(X_train_flat, y_train.ravel())
     y_pred = model.predict(X_test_flat).reshape(-1, 1)
     
-    n_features = X_train.shape[2]
-    y_test_real = inverse_transform_price(y_test, scaler, 0, n_features)
-    y_pred_real = inverse_transform_price(y_pred, scaler, 0, n_features)
+    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'), index_col=0, nrows=1)
+    target_idx = list(train_df.columns).index('log_return') if 'log_return' in train_df.columns else 0
+    
+    y_test_real = reconstruct_price(y_test, X_test, scaler, target_idx)
+    y_pred_real = reconstruct_price(y_pred, X_test, scaler, target_idx)
     
     # For directional accuracy we need "previous day" in USD
-    # The baselines use the old seq=60 .npy files, different test set alignment
+    # The baselines use the .npy files, different test set alignment
     # We'll compute directional accuracy relative to the first value in each sequence
     # (last price the model "saw")
-    last_seen_scaled = X_test[:, -1, 0]  # last timestep, price column
-    last_seen_real = inverse_transform_price(last_seen_scaled, scaler, 0, n_features)
+    last_seen_scaled = X_test[:, -1, 0]  # last timestep, price column (index 0)
+    dummy_x = np.zeros((len(last_seen_scaled), n_features))
+    dummy_x[:, 0] = last_seen_scaled
+    last_seen_real = scaler.inverse_transform(dummy_x)[:, 0]
     
     metrics = compute_all_metrics(y_test_real, y_pred_real, last_seen_real)
     metrics['Model'] = label

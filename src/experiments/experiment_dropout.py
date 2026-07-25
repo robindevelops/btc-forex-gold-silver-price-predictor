@@ -28,20 +28,12 @@ from config import MODELS_DIR, PROCESSED_DATA_DIR
 from src.models.model_lstm import build_lstm_model
 from src.data.preprocessing import create_sequences
 from src.utils.reproducibility import set_all_seeds
+from src.utils.inverse_transform import reconstruct_price
 
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
-
-
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
-    """Inverse-transform scaled price column back to real USD."""
-    if n_features is None:
-        n_features = scaler.n_features_in_
-    dummy = np.zeros((len(scaled_values), n_features))
-    dummy[:, price_col_idx] = np.array(scaled_values).ravel()
-    return scaler.inverse_transform(dummy)[:, price_col_idx]
 
 
 def build_sequences(seq_len=30):
@@ -117,8 +109,10 @@ def run_dropout_experiment(dropout_rate, X_train, y_train, X_val, y_val,
     mae_s = mean_absolute_error(y_test, y_pred_scaled)
     r2_s = r2_score(y_test, y_pred_scaled)
 
-    y_test_real = inverse_transform_price(y_test, scaler, 0, n_features)
-    y_pred_real = inverse_transform_price(y_pred_scaled, scaler, 0, n_features)
+    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, 'btc_train_scaled.csv'), index_col=0, nrows=1)
+    target_idx = list(train_df.columns).index('log_return') if 'log_return' in train_df.columns else list(train_df.columns).index('price')
+    y_test_real = reconstruct_price(y_test, X_test, scaler, target_idx)
+    y_pred_real = reconstruct_price(y_pred_scaled, X_test, scaler, target_idx)
     rmse_usd = np.sqrt(mean_squared_error(y_test_real, y_pred_real))
     mae_usd = mean_absolute_error(y_test_real, y_pred_real)
     r2_usd = r2_score(y_test_real, y_pred_real)

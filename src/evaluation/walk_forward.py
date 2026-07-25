@@ -25,18 +25,14 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from config import PROCESSED_DATA_DIR, MODELS_DIR, BEST_LSTM_CONFIG
 from tensorflow.keras.models import load_model
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from src.utils.inverse_transform import reconstruct_price
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
-    if n_features is None:
-        n_features = scaler.n_features_in_
-    dummy = np.zeros((len(scaled_values), n_features))
-    dummy[:, price_col_idx] = np.array(scaled_values).ravel()
-    return scaler.inverse_transform(dummy)[:, price_col_idx]
+# Replaced by reconstruct_price from src.utils.inverse_transform
 
 
 def get_prefix(asset):
@@ -84,6 +80,7 @@ def walk_forward_validate(asset='Bitcoin'):
     predictions_scaled = []
     actuals_scaled = []
     dates = []
+    x_seqs = []
 
     values = full_df.values
 
@@ -104,6 +101,7 @@ def walk_forward_validate(asset='Bitcoin'):
         predictions_scaled.append(y_pred)
         actuals_scaled.append(y_actual)
         dates.append(full_df.index[target_idx])
+        x_seqs.append(x_seq)
 
         if (i + 1) % 50 == 0 or i == total_test - 1:
             elapsed = (datetime.now() - start_time).total_seconds()
@@ -112,11 +110,17 @@ def walk_forward_validate(asset='Bitcoin'):
     # ── Convert to arrays ──
     pred_scaled = np.array(predictions_scaled)
     act_scaled = np.array(actuals_scaled)
+    x_seqs_arr = np.array(x_seqs)
     dates = pd.DatetimeIndex(dates)
 
     # ── Inverse transform to USD ──
-    pred_usd = inverse_transform_price(pred_scaled, scaler, price_col_idx, n_features)
-    act_usd = inverse_transform_price(act_scaled, scaler, price_col_idx, n_features)
+    target_idx = list(full_df.columns).index('log_return') if 'log_return' in full_df.columns else price_col_idx
+    pred_usd = reconstruct_price(pred_scaled, x_seqs_arr, scaler, target_idx)
+    
+    # actuals are scaled prices directly, unscale them normally
+    dummy = np.zeros((len(act_scaled), n_features))
+    dummy[:, price_col_idx] = act_scaled
+    act_usd = scaler.inverse_transform(dummy)[:, price_col_idx]
 
     # ── Overall metrics ──
     rmse = np.sqrt(mean_squared_error(act_usd, pred_usd))

@@ -23,6 +23,7 @@ warnings.filterwarnings('ignore')
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from tensorflow.keras.models import load_model
+from src.utils.inverse_transform import reconstruct_price
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -47,12 +48,7 @@ def compute_metrics(y_true, y_pred):
     return {'RMSE_USD': rmse, 'MAE_USD': mae, 'R2': r2, 'MAPE': mape}
 
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
-    if n_features is None:
-        n_features = scaler.n_features_in_
-    dummy = np.zeros((len(scaled_values), n_features))
-    dummy[:, price_col_idx] = np.array(scaled_values).ravel()
-    return scaler.inverse_transform(dummy)[:, price_col_idx]
+# Replaced by reconstruct_price from src.utils.inverse_transform
 
 
 def get_arima_forecast(asset):
@@ -111,8 +107,9 @@ def get_lstm_predictions(asset):
     y_pred_scaled = model.predict(X_test, verbose=0)
     n_features = X_test.shape[2]
 
-    y_test_real = inverse_transform_price(y_test, scaler, 0, n_features)
-    y_pred_real = inverse_transform_price(y_pred_scaled, scaler, 0, n_features)
+    target_idx = list(full_df.columns).index('log_return') if 'log_return' in full_df.columns else list(full_df.columns).index('price')
+    y_test_real = reconstruct_price(y_test, X_test, scaler, target_idx)
+    y_pred_real = reconstruct_price(y_pred_scaled, X_test, scaler, target_idx)
 
     return test_dates, y_test_real, y_pred_real
 

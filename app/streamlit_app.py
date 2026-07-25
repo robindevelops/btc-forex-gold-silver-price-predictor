@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from config import PROCESSED_DATA_DIR, MODELS_DIR, BEST_LSTM_CONFIG
 from src.data.preprocessing import create_sequences
 from src.data.sync_live_data import update_live_data
+from src.utils.inverse_transform import reconstruct_price
 
 RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results'))
 
@@ -123,12 +124,7 @@ def load_scaled_data(asset):
         st.error(f"Failed to load scaled datasets for {asset}: {str(e)}")
         return None
 
-def inverse_transform_price(scaled_values, scaler, price_col_idx=0, n_features=None):
-    if n_features is None:
-        n_features = scaler.n_features_in_
-    dummy = np.zeros((len(scaled_values), n_features))
-    dummy[:, price_col_idx] = np.array(scaled_values).ravel()
-    return scaler.inverse_transform(dummy)[:, price_col_idx]
+# Replaced by reconstruct_price from src.utils.inverse_transform
 
 # ═══════════════════════════════════════════════════════════
 #  SIDEBAR
@@ -326,14 +322,15 @@ with tab1:
                     X_recent, y_recent = create_sequences(recent_df, seq_len=seq_len)
                     
                     y_pred_scaled = model.predict(X_recent, verbose=0)
-                    y_recent_usd = inverse_transform_price(y_recent, scaler, price_col_idx, n_features)
-                    y_pred_usd = inverse_transform_price(y_pred_scaled, scaler, price_col_idx, n_features)
+                    target_idx = list(full_df.columns).index('log_return') if 'log_return' in full_df.columns else price_col_idx
+                    y_recent_usd = reconstruct_price(y_recent, X_recent, scaler, target_idx)
+                    y_pred_usd = reconstruct_price(y_pred_scaled, X_recent, scaler, target_idx)
                     recent_dates = recent_df.index[seq_len:]
                     
                     # 2. Predict Tomorrow (Inference)
                     last_sequence = full_df.values[-seq_len:].reshape(1, seq_len, n_features)
                     tomorrow_scaled = model.predict(last_sequence, verbose=0)
-                    tomorrow_usd = inverse_transform_price(tomorrow_scaled, scaler, price_col_idx, n_features)[0]
+                    tomorrow_usd = reconstruct_price(tomorrow_scaled, last_sequence, scaler, target_idx)[0]
                     
                     # Display Next Day Prediction
                     predicted_change = tomorrow_usd - latest_price

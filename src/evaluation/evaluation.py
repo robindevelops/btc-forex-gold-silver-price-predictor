@@ -21,6 +21,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from config import PROCESSED_DATA_DIR, MODELS_DIR, BEST_LSTM_CONFIG
 from src.data.preprocessing import create_sequences
+from src.utils.inverse_transform import reconstruct_price
 
 def compute_mape(y_true, y_pred):
     # Avoid division by zero
@@ -83,8 +84,10 @@ def evaluate_lstm(asset_name):
     y_pred = model.predict(X_test, verbose=0)
     n_features = X_test.shape[2]
     
-    y_test_real = inverse_transform_price(y_test, scaler, 0, n_features)
-    y_pred_real = inverse_transform_price(y_pred, scaler, 0, n_features)
+    target_idx = list(full_df.columns).index('log_return') if 'log_return' in full_df.columns else list(full_df.columns).index('price')
+    
+    y_test_real = reconstruct_price(y_test, X_test, scaler, target_idx)
+    y_pred_real = reconstruct_price(y_pred, X_test, scaler, target_idx)
     
     res = evaluate_predictions(y_test, y_pred, y_test_real, y_pred_real)
     res['Asset'] = asset_name
@@ -111,9 +114,13 @@ def evaluate_baseline(asset_name, model_type):
     model.fit(X_train_flat, y_train.ravel())
     y_pred = model.predict(X_test_flat).reshape(-1, 1)
     
-    n_features = X_train.shape[2]
-    y_test_real = inverse_transform_price(y_test, scaler, 0, n_features)
-    y_pred_real = inverse_transform_price(y_pred, scaler, 0, n_features)
+    # Retrieve feature column names to find target_idx dynamically
+    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'), index_col=0, nrows=1)
+    target_idx = list(train_df.columns).index('log_return') if 'log_return' in train_df.columns else list(train_df.columns).index('price')
+    # Because baselines aren't sequence models in the same way, we can still use reconstruct_price
+    # Since X_test shape is (samples, seq_len, features) before flatten, we can use X_test!
+    y_test_real = reconstruct_price(y_test, X_test, scaler, target_idx)
+    y_pred_real = reconstruct_price(y_pred, X_test, scaler, target_idx)
     
     res = evaluate_predictions(y_test, y_pred, y_test_real, y_pred_real)
     res['Asset'] = asset_name
