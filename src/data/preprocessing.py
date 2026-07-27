@@ -115,6 +115,130 @@ class DataCleaner:
         self.df['BB_Lower'] = sma - (std * std_dev)
         print(f"Added Bollinger Bands (period={period}, std_dev={std_dev}).")
 
+    def add_lag_returns(self, lags=None):
+        """
+        Adds lagged log return features.
+        
+        Week 3 Feature: Captures short-term momentum at multiple timescales.
+        Uses shift() to ensure each lag only references strictly past data.
+        
+        Args:
+            lags: list of lag periods (default: [1, 2, 5, 10])
+        """
+        if self.df is None:
+            return
+        if lags is None:
+            lags = [1, 2, 5, 10]
+        
+        for lag in lags:
+            self.df[f'return_{lag}d'] = self.df['log_return'].shift(lag)
+        
+        print(f"Added lag return features for lags: {lags}")
+
+    def add_rolling_volatility(self, windows=None):
+        """
+        Adds rolling standard deviation of log returns as volatility features.
+        
+        Week 3 Feature: Volatility clustering is one of the few genuinely robust
+        patterns in financial data. Helps the model gauge current uncertainty.
+        
+        Args:
+            windows: list of rolling window sizes (default: [10, 30])
+        """
+        if self.df is None:
+            return
+        if windows is None:
+            windows = [10, 30]
+        
+        for w in windows:
+            self.df[f'volatility_{w}d'] = self.df['log_return'].rolling(window=w).std()
+        
+        print(f"Added rolling volatility features for windows: {windows}")
+
+    def add_calendar_features(self):
+        """
+        Adds cyclical day-of-week encoding using sin/cos transformation.
+        
+        Week 3 Feature: Markets show documented day-of-week effects (Monday/Friday).
+        Cyclical encoding avoids artificial ordinal relationships (Mon=0, Tue=1, etc.)
+        that a linear encoding would create.
+        """
+        if self.df is None:
+            return
+        
+        day_of_week = self.df.index.dayofweek  # 0=Monday, 6=Sunday
+        self.df['dow_sin'] = np.sin(2 * np.pi * day_of_week / 7)
+        self.df['dow_cos'] = np.cos(2 * np.pi * day_of_week / 7)
+        
+        print("Added cyclical day-of-week features (dow_sin, dow_cos).")
+
+    def add_volume_change(self):
+        """
+        Adds percentage change in volume vs. prior day.
+        
+        Week 3 Feature: Sudden volume spikes often precede or confirm
+        real price moves vs. noise. Handles zero-volume edge cases.
+        """
+        if self.df is None:
+            return
+        
+        # Use pct_change, then replace inf values (from division by zero volume) with 0
+        self.df['volume_change'] = self.df['volume'].pct_change()
+        self.df['volume_change'] = self.df['volume_change'].replace([np.inf, -np.inf], 0)
+        
+        print("Added volume_change feature.")
+
+    def add_external_features(self):
+        """
+        Merges external macro/sentiment data into the feature set.
+        
+        Week 4 Feature: Addresses the audit finding that the model
+        "captures zero macroeconomic factors" (Part 8B).
+        
+        Asset-specific mapping:
+          - Gold/Silver: DXY return, Crude Oil return
+          - Bitcoin: Fear & Greed Index
+        """
+        if self.df is None:
+            return
+        
+        asset_type = ASSET_CONFIG[self.asset_name].get('type', '')
+        
+        # --- DXY and Crude Oil for commodities (Gold/Silver) ---
+        if asset_type == 'commodity':
+            for ext_name, ext_file, col_prefix in [
+                ('DXY', 'dxy_data.csv', 'dxy'),
+                ('Crude Oil', 'crude_oil_data.csv', 'oil'),
+            ]:
+                ext_path = os.path.join(RAW_DATA_DIR, ext_file)
+                if os.path.exists(ext_path):
+                    ext_df = pd.read_csv(ext_path, parse_dates=['timestamp'])
+                    ext_df = ext_df.set_index('timestamp')
+                    ext_df = ext_df.reindex(self.df.index).ffill().bfill()
+                    
+                    # Add log return of external source (not raw price level)
+                    self.df[f'{col_prefix}_return'] = np.log(
+                        ext_df['price'] / ext_df['price'].shift(1)
+                    )
+                    self.df[f'{col_prefix}_return'] = self.df[f'{col_prefix}_return'].fillna(0)
+                    print(f"Added {ext_name} return feature ({col_prefix}_return).")
+                else:
+                    print(f"WARNING: {ext_name} data not found at {ext_path}. Skipping.")
+        
+        # --- Fear & Greed Index for crypto (Bitcoin) ---
+        if asset_type == 'crypto':
+            fg_path = os.path.join(RAW_DATA_DIR, 'fear_greed_data.csv')
+            if os.path.exists(fg_path):
+                fg_df = pd.read_csv(fg_path, parse_dates=['timestamp'])
+                fg_df = fg_df.set_index('timestamp')
+                fg_df = fg_df.reindex(self.df.index).ffill().bfill()
+                
+                self.df['fear_greed'] = fg_df['fear_greed']
+                self.df['fear_greed'] = self.df['fear_greed'].fillna(50)  # neutral default
+                print("Added Fear & Greed Index feature.")
+            else:
+                print(f"WARNING: Fear & Greed data not found at {fg_path}. Skipping.")
+
     def validate_features(self):
         """
         Validates the final DataFrame to ensure no NaNs and correct shape.
@@ -174,7 +298,16 @@ class DataCleaner:
         self.add_macd(fast=12, slow=26, signal=9)
         self.add_bollinger_bands(period=20, std_dev=2)
         
-        # Optional dropnas again as Bollinger and MACD adds more nans at the start
+        # 6. Week 3 Features: Lag returns, volatility, calendar, volume change
+        self.add_lag_returns(lags=[1, 2, 5, 10])
+        self.add_rolling_volatility(windows=[10, 30])
+        self.add_calendar_features()
+        self.add_volume_change()
+        
+        # 7. Week 4 Features: External macro/sentiment data
+        self.add_external_features()
+        
+        # Drop NaNs created by rolling windows and lag features (warm-up period)
         self.df = self.df.dropna()
 
         # 6. Validate Features

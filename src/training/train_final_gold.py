@@ -19,8 +19,10 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from config import MODELS_DIR, PROCESSED_DATA_DIR, BEST_LSTM_CONFIG
+from config import MODELS_DIR, PROCESSED_DATA_DIR, BEST_LSTM_CONFIG, BEST_LGBM_CONFIG, BEST_GRU_CONFIG
 from src.models.model_lstm import build_lstm_model
+from src.models.model_gru import build_gru_model
+from src.models.model_lgbm import build_lgbm_model, save_lgbm_model
 from src.data.preprocessing import create_sequences
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -124,7 +126,7 @@ if __name__ == "__main__":
     )
     print(f"  Training completed in {(datetime.now() - start_time).total_seconds():.0f}s")
     
-    # --- EVALUATION ON BLIND TEST SET ---
+    # --- EVALUATION ON BLIND TEST SET (LSTM) ---
     y_pred_scaled = model_final.predict(X_test, verbose=0)
     rmse_s = np.sqrt(mean_squared_error(y_test, y_pred_scaled))
     mae_s = mean_absolute_error(y_test, y_pred_scaled)
@@ -137,28 +139,120 @@ if __name__ == "__main__":
     y_pred_real = reconstruct_price(y_pred_scaled, X_test, scaler, target_idx)
     rmse_usd = np.sqrt(mean_squared_error(y_test_real, y_pred_real))
     mae_usd = mean_absolute_error(y_test_real, y_pred_real)
+
+    print("\n" + "="*50)
+    print("  TRAINING LIGHTGBM MODEL")
+    print("="*50)
     
-    print(f"\n  Final UNBIASED Evaluation (Test Set):")
-    print(f"    RMSE (scaled): {rmse_s:.6f}")
-    print(f"    MAE (scaled):  {mae_s:.6f}")
-    print(f"    R²:            {r2_s:.6f}")
-    print(f"    RMSE (USD):    ${rmse_usd:,.2f}")
-    print(f"    MAE (USD):     ${mae_usd:,.2f}")
+    lgbm_cfg = BEST_LGBM_CONFIG
+    # Flatten sequences for LightGBM
+    X_train_flat = X_train.reshape(X_train.shape[0], -1)
+    X_val_flat = X_val.reshape(X_val.shape[0], -1)
+    X_tr_flat = X_tr.reshape(X_tr.shape[0], -1)
+    X_test_flat = X_test.reshape(X_test.shape[0], -1)
     
-    # Save the model
+    model_lgbm = build_lgbm_model(
+        n_estimators=lgbm_cfg['n_estimators'],
+        learning_rate=lgbm_cfg['learning_rate'],
+        max_depth=lgbm_cfg['max_depth'],
+        num_leaves=lgbm_cfg['num_leaves'],
+        subsample=lgbm_cfg['subsample'],
+        colsample_bytree=lgbm_cfg['colsample_bytree']
+    )
+    
+    start_time = datetime.now()
+    model_lgbm.fit(
+        X_train_flat, y_train.ravel(),
+        eval_set=[(X_val_flat, y_val.ravel())],
+        callbacks=[]
+    )
+    model_lgbm.fit(X_tr_flat, y_tr.ravel())
+    print(f"  LightGBM Training completed in {(datetime.now() - start_time).total_seconds():.0f}s")
+    
+    y_pred_lgbm_scaled = model_lgbm.predict(X_test_flat).reshape(-1, 1)
+    y_pred_lgbm_real = reconstruct_price(y_pred_lgbm_scaled, X_test, scaler, target_idx)
+    rmse_lgbm_usd = np.sqrt(mean_squared_error(y_test_real, y_pred_lgbm_real))
+    r2_lgbm = r2_score(y_test, y_pred_lgbm_scaled)
+    
+    print(f"\n  Final Evaluation (LightGBM):")
+    print(f"    RMSE (USD):    ${rmse_lgbm_usd:,.2f}")
+    print(f"    R²:            {r2_lgbm:.6f}")
+    
+    lgbm_path = os.path.join(MODELS_DIR, 'gold_lgbm_final.pkl')
+    save_lgbm_model(model_lgbm, lgbm_path)
+    print(f"  ✅ LightGBM saved to {lgbm_path}")
+    
+    print("\n" + "="*50)
+    print("  TRAINING GRU MODEL")
+    print("="*50)
+    gru_cfg = BEST_GRU_CONFIG
+    
+    print("\n  Phase 1: Finding optimal epochs via Validation Set...")
+    model_gru_val = build_gru_model(
+        seq_len=gru_cfg['seq_len'], n_features=n_features,
+        learning_rate=gru_cfg['learning_rate'], gru_units=gru_cfg['gru_units'],
+        dense_units=gru_cfg['dense_units'], dropout_rate=gru_cfg['dropout_rate']
+    )
+    
+    history_gru_val = model_gru_val.fit(
+        X_train, y_train, validation_data=(X_val, y_val),
+        epochs=gru_cfg['epochs'], batch_size=gru_cfg['batch_size'],
+        callbacks=callbacks_val, verbose=0
+    )
+    best_epoch_gru = np.argmin(history_gru_val.history['val_loss']) + 1
+    print(f"  Optimal GRU epochs found: {best_epoch_gru}")
+    
+    print(f"\n  Phase 2: Retraining on full dataset for {best_epoch_gru} epochs...")
+    model_gru_final = build_gru_model(
+        seq_len=gru_cfg['seq_len'], n_features=n_features,
+        learning_rate=gru_cfg['learning_rate'], gru_units=gru_cfg['gru_units'],
+        dense_units=gru_cfg['dense_units'], dropout_rate=gru_cfg['dropout_rate']
+    )
+    start_time = datetime.now()
+    model_gru_final.fit(
+        X_tr, y_tr,
+        epochs=best_epoch_gru,
+        batch_size=gru_cfg['batch_size'],
+        callbacks=callbacks_final,
+        verbose=0
+    )
+    print(f"  GRU Training completed in {(datetime.now() - start_time).total_seconds():.0f}s")
+    
+    y_pred_gru_scaled = model_gru_final.predict(X_test, verbose=0)
+    y_pred_gru_real = reconstruct_price(y_pred_gru_scaled, X_test, scaler, target_idx)
+    rmse_gru_usd = np.sqrt(mean_squared_error(y_test_real, y_pred_gru_real))
+    r2_gru = r2_score(y_test, y_pred_gru_scaled)
+    
+    print(f"\n  Final Evaluation (GRU):")
+    print(f"    RMSE (USD):    ${rmse_gru_usd:,.2f}")
+    print(f"    R²:            {r2_gru:.6f}")
+    
+    gru_path_keras = os.path.join(MODELS_DIR, 'gold_gru_final.keras')
+    model_gru_final.save(gru_path_keras)
+    print(f"  ✅ GRU saved to {gru_path_keras}")
+    
+    print("\n" + "="*50)
+    print("  MODEL COMPARISON SUMMARY")
+    print("="*50)
+    print(f"  LSTM:     RMSE ${rmse_usd:,.2f} | R² {r2_s:.4f}")
+    print(f"  GRU:      RMSE ${rmse_gru_usd:,.2f} | R² {r2_gru:.4f}")
+    print(f"  LightGBM: RMSE ${rmse_lgbm_usd:,.2f} | R² {r2_lgbm:.4f}")
+    
+    # Save the LSTM model
     ckpt_path_keras = os.path.join(MODELS_DIR, 'gold_lstm_final.keras')
     ckpt_path_h5 = os.path.join(MODELS_DIR, 'gold_lstm_final.h5')
     
     model_final.save(ckpt_path_keras)
     model_final.save(ckpt_path_h5)
-    print(f"\n  ✅ Model saved to {ckpt_path_keras}")
-    print(f"  ✅ Model also saved to {ckpt_path_h5}")
+    print(f"\n  ✅ LSTM saved to {ckpt_path_keras}")
+    print(f"  ✅ LSTM also saved to {ckpt_path_h5}")
 
     # Plot predictions
     plt.figure(figsize=(14, 6))
     plt.plot(test_dates, y_test_real, label='Actual Gold Price', color='gold', linewidth=2)
-    plt.plot(test_dates, y_pred_real, label='LSTM Predicted', color='blue', linestyle='--', linewidth=2)
-    plt.title('Gold Price Prediction vs Actual (LSTM Final Test Set)', fontsize=16)
+    plt.plot(test_dates, y_pred_real, label='LSTM Predicted', color='blue', linestyle='--', linewidth=1)
+    plt.plot(test_dates, y_pred_lgbm_real, label='LightGBM Predicted', color='green', linestyle='-', linewidth=2)
+    plt.title('Gold Price Prediction vs Actual (LightGBM vs LSTM)', fontsize=16)
     plt.xlabel('Date', fontsize=12)
     plt.ylabel('Price (USD)', fontsize=12)
     plt.legend()
@@ -166,9 +260,6 @@ if __name__ == "__main__":
     plt.tight_layout()
     
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    plot_path = os.path.join(RESULTS_DIR, 'gold_lstm_predictions.png')
+    plot_path = os.path.join(RESULTS_DIR, 'gold_lgbm_vs_lstm_predictions.png')
     plt.savefig(plot_path)
     print(f"  ✅ Plot saved to {plot_path}")
-    
-    # Output markdown format string so Antigravity can read it for artifact
-    print(f"\n[EVAL_MARKER]|RMSE={rmse_s:.6f}|MAE={mae_s:.6f}|R2={r2_s:.6f}|RMSE_USD={rmse_usd:.2f}|MAE_USD={mae_usd:.2f}")

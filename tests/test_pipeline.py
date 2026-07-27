@@ -75,9 +75,10 @@ class TestCryptoPipeline(unittest.TestCase):
         
         # 2. Test Prediction Output
         seq_len = BEST_LSTM_CONFIG['seq_len']
-        n_features = 16 # Based on our standard pipeline
+        # Dynamically detect n_features from model input shape (no hardcoding)
+        n_features = model.input_shape[-1]
         
-        # Create a dummy input sequence (1 sample, 30 timesteps, 16 features)
+        # Create a dummy input sequence (1 sample, seq_len timesteps, n_features)
         dummy_input = np.random.rand(1, seq_len, n_features)
         
         prediction = model.predict(dummy_input, verbose=0)

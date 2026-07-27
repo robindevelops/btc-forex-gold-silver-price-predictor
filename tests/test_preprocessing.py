@@ -116,6 +116,67 @@ class TestPreprocessing(unittest.TestCase):
         self.assertAlmostEqual(actual_log_return, expected_log_return, places=6,
                                msg="log_return calculation mismatch")
 
+    def test_week3_features_exist(self):
+        """Test that Week 3 features are present in the dataset."""
+        expected_features = [
+            'return_1d', 'return_2d', 'return_5d', 'return_10d',
+            'volatility_10d', 'volatility_30d',
+            'dow_sin', 'dow_cos',
+            'volume_change'
+        ]
+        for feat in expected_features:
+            self.assertIn(feat, self.features_df.columns,
+                          f"Week 3 feature '{feat}' not found in features")
+
+    def test_lag_returns_no_future_leakage(self):
+        """
+        Test that lag return features only reference strictly past data.
+        
+        For row t, return_1d should equal log_return at row t-1.
+        This verifies the shift direction is correct (backward, not forward).
+        """
+        # Get the unscaled features for this check
+        log_returns = self.features_df['log_return'].values
+        return_1d = self.features_df['return_1d'].values
+        
+        # return_1d[i] should equal log_return[i-1] (shifted by 1)
+        # Since NaN warm-up rows are already dropped, check alignment
+        # by verifying return_1d matches shifted log_return within the valid range
+        for i in range(1, min(10, len(log_returns))):
+            self.assertAlmostEqual(
+                return_1d[i], log_returns[i - 1], places=10,
+                msg=f"return_1d at index {i} does not match log_return at index {i-1}"
+            )
+
+    def test_volume_change_no_inf(self):
+        """Test that volume_change contains no inf values."""
+        self.assertFalse(
+            np.isinf(self.features_df['volume_change']).any(),
+            "volume_change contains infinity values"
+        )
+
+    def test_cyclical_encoding_range(self):
+        """Test that cyclical day-of-week features are in [-1, 1] range."""
+        self.assertTrue(self.features_df['dow_sin'].between(-1, 1).all(),
+                        "dow_sin out of [-1, 1] range")
+        self.assertTrue(self.features_df['dow_cos'].between(-1, 1).all(),
+                        "dow_cos out of [-1, 1] range")
+
+    def test_week4_external_features_btc(self):
+        """Test that Bitcoin dataset includes Fear & Greed Index (Week 4)."""
+        # Bitcoin is a crypto asset, so it should have fear_greed
+        self.assertIn('fear_greed', self.features_df.columns,
+                      "fear_greed feature not found in BTC features")
+        self.assertFalse(self.features_df['fear_greed'].isna().any(),
+                         "fear_greed contains NaN values")
+        self.assertFalse(np.isinf(self.features_df['fear_greed']).any(),
+                         "fear_greed contains inf values")
+
+    def test_week4_no_nan_in_external_features(self):
+        """Test that no NaN values exist after external feature integration."""
+        self.assertEqual(self.features_df.isna().sum().sum(), 0,
+                         "Features contain NaN values after Week 4 integration")
+
 
 if __name__ == '__main__':
     unittest.main()

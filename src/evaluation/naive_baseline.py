@@ -15,7 +15,8 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 # Ensure src is in the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from config import PROCESSED_DATA_DIR, RESULTS_DIR
+from config import PROCESSED_DATA_DIR
+RESULTS_DIR = 'results'
 
 def compute_metrics(y_true, y_pred, model_name=""):
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
