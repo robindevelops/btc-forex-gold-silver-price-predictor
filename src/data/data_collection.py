@@ -39,8 +39,8 @@ def fetch_forex_data(asset_name):
     df = df.reset_index()
     
     # Clean and standardize
-    df = df[['Date', 'Close', 'Volume']]
-    df.columns = ['timestamp', 'price', 'volume']
+    df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+    df.columns = ['timestamp', 'open', 'high', 'low', 'price', 'volume']
     
     # Ensure datetime format (removing timezone if present for CSV compatibility)
     df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)

@@ -33,6 +33,21 @@ EXTERNAL_SOURCES = {
         'filename': 'crude_oil_data.csv',
         'description': 'WTI Crude Oil Futures — commodity co-movement signal',
     },
+    'VIX': {
+        'ticker': '^VIX',
+        'filename': 'vix_data.csv',
+        'description': 'CBOE Volatility Index (Fear Gauge)',
+    },
+    'TreasuryYields': {
+        'ticker': '^TNX',
+        'filename': 'tnx_data.csv',
+        'description': '10-Year Treasury Yield — critical for Gold',
+    },
+    'SP500': {
+        'ticker': '^GSPC',
+        'filename': 'sp500_data.csv',
+        'description': 'S&P 500 Index — broad market correlation',
+    },
 }
 
 

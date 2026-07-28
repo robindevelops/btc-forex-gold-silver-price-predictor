@@ -201,6 +201,7 @@ def eval_baseline(asset, model_type):
     # We'll compute directional accuracy relative to the first value in each sequence
     # (last price the model "saw")
     last_seen_scaled = X_test[:, -1, 0]  # last timestep, price column (index 0)
+    n_features = X_test.shape[2]
     dummy_x = np.zeros((len(last_seen_scaled), n_features))
     dummy_x[:, 0] = last_seen_scaled
     last_seen_real = scaler.inverse_transform(dummy_x)[:, 0]

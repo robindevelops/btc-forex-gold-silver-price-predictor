@@ -97,23 +97,60 @@ class DataCleaner:
         self.df['MACD_Signal'] = self.df['MACD'].ewm(span=signal, adjust=False).mean()
         print("Added MACD (12, 26, 9) indicator.")
 
-    def add_bollinger_bands(self, period=20, std_dev=2):
+    def add_advanced_ta(self):
         """
-        Calculates Bollinger Bands.
-        Middle Band = 20-day SMA
-        Upper Band = 20-day SMA + (20-day StdDev * std_dev)
-        Lower Band = 20-day SMA - (20-day StdDev * std_dev)
+        Adds advanced technical indicators using the 'ta' library.
+        Includes: Bollinger Bands, VWAP, Stochastic Oscillator, Williams %R, 
+        ADX, CCI, ROC, and ATR.
         """
         if self.df is None:
             return
-
-        sma = self.df['price'].rolling(window=period).mean()
-        std = self.df['price'].rolling(window=period).std()
+            
+        import ta
         
-        self.df['BB_Mid'] = sma
-        self.df['BB_Upper'] = sma + (std * std_dev)
-        self.df['BB_Lower'] = sma - (std * std_dev)
-        print(f"Added Bollinger Bands (period={period}, std_dev={std_dev}).")
+        # Bollinger Bands
+        indicator_bb = ta.volatility.BollingerBands(close=self.df['price'], window=20, window_dev=2)
+        self.df['BB_Mid'] = indicator_bb.bollinger_mavg()
+        self.df['BB_Upper'] = indicator_bb.bollinger_hband()
+        self.df['BB_Lower'] = indicator_bb.bollinger_lband()
+        
+        # ATR (Average True Range)
+        self.df['ATR'] = ta.volatility.average_true_range(
+            high=self.df['high'], low=self.df['low'], close=self.df['price'], window=14
+        )
+        
+        # VWAP (Volume Weighted Average Price) approximation daily
+        self.df['VWAP'] = ta.volume.volume_weighted_average_price(
+            high=self.df['high'], low=self.df['low'], close=self.df['price'], volume=self.df['volume'], window=14
+        )
+        
+        # Stochastic Oscillator
+        stoch = ta.momentum.StochasticOscillator(
+            high=self.df['high'], low=self.df['low'], close=self.df['price'], window=14, smooth_window=3
+        )
+        self.df['Stoch_K'] = stoch.stoch()
+        self.df['Stoch_D'] = stoch.stoch_signal()
+        
+        # Williams %R
+        self.df['Williams_R'] = ta.momentum.williams_r(
+            high=self.df['high'], low=self.df['low'], close=self.df['price'], lbp=14
+        )
+        
+        # ADX
+        adx = ta.trend.ADXIndicator(
+            high=self.df['high'], low=self.df['low'], close=self.df['price'], window=14
+        )
+        self.df['ADX'] = adx.adx()
+        
+        # CCI
+        self.df['CCI'] = ta.trend.cci(
+            high=self.df['high'], low=self.df['low'], close=self.df['price'], window=20
+        )
+        
+        # ROC
+        self.df['ROC'] = ta.momentum.roc(close=self.df['price'], window=12)
+        
+        print("Added advanced TA features: BB, ATR, VWAP, Stoch, Williams %R, ADX, CCI, ROC.")
 
     def add_lag_returns(self, lags=None):
         """
@@ -204,26 +241,36 @@ class DataCleaner:
         
         asset_type = ASSET_CONFIG[self.asset_name].get('type', '')
         
-        # --- DXY and Crude Oil for commodities (Gold/Silver) ---
+        # --- External Macro Features ---
+        macro_sources = []
         if asset_type == 'commodity':
-            for ext_name, ext_file, col_prefix in [
+            macro_sources.extend([
                 ('DXY', 'dxy_data.csv', 'dxy'),
                 ('Crude Oil', 'crude_oil_data.csv', 'oil'),
-            ]:
-                ext_path = os.path.join(RAW_DATA_DIR, ext_file)
-                if os.path.exists(ext_path):
-                    ext_df = pd.read_csv(ext_path, parse_dates=['timestamp'])
-                    ext_df = ext_df.set_index('timestamp')
-                    ext_df = ext_df.reindex(self.df.index).ffill().bfill()
-                    
-                    # Add log return of external source (not raw price level)
-                    self.df[f'{col_prefix}_return'] = np.log(
-                        ext_df['price'] / ext_df['price'].shift(1)
-                    )
-                    self.df[f'{col_prefix}_return'] = self.df[f'{col_prefix}_return'].fillna(0)
-                    print(f"Added {ext_name} return feature ({col_prefix}_return).")
-                else:
-                    print(f"WARNING: {ext_name} data not found at {ext_path}. Skipping.")
+                ('Treasury Yields', 'tnx_data.csv', 'tnx')
+            ])
+            
+        # Global macro for all assets
+        macro_sources.extend([
+            ('S&P 500', 'sp500_data.csv', 'sp500'),
+            ('VIX', 'vix_data.csv', 'vix')
+        ])
+
+        for ext_name, ext_file, col_prefix in macro_sources:
+            ext_path = os.path.join(RAW_DATA_DIR, ext_file)
+            if os.path.exists(ext_path):
+                ext_df = pd.read_csv(ext_path, parse_dates=['timestamp'])
+                ext_df = ext_df.set_index('timestamp')
+                ext_df = ext_df.reindex(self.df.index).ffill().bfill()
+                
+                # Add log return of external source (not raw price level)
+                self.df[f'{col_prefix}_return'] = np.log(
+                    ext_df['price'] / ext_df['price'].shift(1)
+                )
+                self.df[f'{col_prefix}_return'] = self.df[f'{col_prefix}_return'].fillna(0)
+                print(f"Added {ext_name} return feature ({col_prefix}_return).")
+            else:
+                print(f"WARNING: {ext_name} data not found at {ext_path}. Skipping.")
         
         # --- Fear & Greed Index for crypto (Bitcoin) ---
         if asset_type == 'crypto':
@@ -296,7 +343,7 @@ class DataCleaner:
         self.add_moving_averages()
         self.add_rsi(window=14)
         self.add_macd(fast=12, slow=26, signal=9)
-        self.add_bollinger_bands(period=20, std_dev=2)
+        self.add_advanced_ta()
         
         # 6. Week 3 Features: Lag returns, volatility, calendar, volume change
         self.add_lag_returns(lags=[1, 2, 5, 10])

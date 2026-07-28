@@ -69,21 +69,23 @@ BEST_GRU_CONFIG = {
 CV_FOLDS = 3  # 3 folds to balance robust evaluation with deep learning training times
 
 # Model status per asset — controls which model is served for predictions.
-# Week 5 Update: LightGBM replaces LSTM as primary model.
+# Week 6 Update: Stacked Ensemble (meta-model) is primary for BTC/Gold, GRU for Silver.
 MODEL_STATUS = {
     'Bitcoin': {
-        'primary_model': 'lightgbm',
-        'model_file': 'btc_lgbm_final.pkl',
+        'primary_model': 'stacked_ensemble',
+        'model_file': 'btc_meta_model.pkl',
+        'base_models': ['btc_gru_final.keras', 'btc_lgbm_final.pkl'],
         'status': 'active',
     },
     'Gold': {
-        'primary_model': 'lightgbm',
-        'model_file': 'gold_lgbm_final.pkl',
+        'primary_model': 'stacked_ensemble',
+        'model_file': 'gold_meta_model.pkl',
+        'base_models': ['gold_gru_final.keras', 'gold_lgbm_final.pkl'],
         'status': 'active',
     },
     'Silver': {
-        'primary_model': 'lightgbm',
-        'model_file': 'silver_lgbm_final.pkl',
+        'primary_model': 'gru',
+        'model_file': 'silver_gru_final.keras',
         'status': 'active',
     },
 }
