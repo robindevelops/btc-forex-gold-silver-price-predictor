@@ -19,7 +19,7 @@ from src.data.preprocessing import create_sequences
 from src.data.sync_live_data import update_live_data
 from src.utils.inverse_transform import reconstruct_price
 
-RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'results'))
+RESULTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src', 'results'))
 
 # ═══════════════════════════════════════════════════════════
 #  PAGE CONFIGURATION

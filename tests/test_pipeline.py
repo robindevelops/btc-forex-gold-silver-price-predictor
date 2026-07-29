@@ -22,6 +22,9 @@ class TestCryptoPipeline(unittest.TestCase):
         
         self.dummy_df = pd.DataFrame({
             'timestamp': dates,
+            'open': prices * 1.0,
+            'high': prices * 1.05,
+            'low': prices * 0.95,
             'price': prices,
             'volume': volumes
         })

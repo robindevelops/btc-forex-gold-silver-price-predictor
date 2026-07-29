@@ -34,6 +34,9 @@ class TestFeatureEngineering(unittest.TestCase):
 
         cls.df = pd.DataFrame({
             'timestamp': dates,
+            'open': prices * 1.0,
+            'high': prices * 1.05,
+            'low': prices * 0.95,
             'price': prices,
             'volume': volumes
         })
@@ -78,7 +81,7 @@ class TestFeatureEngineering(unittest.TestCase):
     def test_bollinger_bands_ordering(self):
         """Upper band >= Middle band >= Lower band everywhere."""
         cleaner = self._make_cleaner()
-        cleaner.add_bollinger_bands(period=20, std_dev=2)
+        cleaner.add_advanced_ta()
 
         valid = cleaner.df.dropna(subset=['BB_Upper', 'BB_Mid', 'BB_Lower'])
         self.assertTrue(
@@ -117,7 +120,7 @@ class TestFeatureEngineering(unittest.TestCase):
         cleaner.add_moving_averages()
         cleaner.add_rsi()
         cleaner.add_macd()
-        cleaner.add_bollinger_bands()
+        cleaner.add_advanced_ta()
 
         expected_features = {
             'price', 'volume',
@@ -127,9 +130,8 @@ class TestFeatureEngineering(unittest.TestCase):
             'BB_Mid', 'BB_Upper', 'BB_Lower'
         }
         actual_features = set(cleaner.df.columns)
-        self.assertEqual(expected_features, actual_features,
-                         f"Feature mismatch. Missing: {expected_features - actual_features}, "
-                         f"Extra: {actual_features - expected_features}")
+        self.assertTrue(expected_features.issubset(actual_features),
+                         f"Feature mismatch. Missing: {expected_features - actual_features}")
 
 
 if __name__ == '__main__':

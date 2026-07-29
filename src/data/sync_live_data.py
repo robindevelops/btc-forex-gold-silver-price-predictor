@@ -24,8 +24,8 @@ def update_live_data(asset_name):
             print(f"yFinance returned empty dataframe for {asset_name}. API might be down or rate-limited.")
             return False
             
-        df = df[['Date', 'Close', 'Volume']]
-        df.columns = ['timestamp', 'price', 'volume']
+        df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+        df.columns = ['timestamp', 'open', 'high', 'low', 'price', 'volume']
         df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
     except Exception as e:
         print(f"API Error fetching {asset_name}: {str(e)}")
