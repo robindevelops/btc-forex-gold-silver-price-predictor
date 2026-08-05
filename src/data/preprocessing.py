@@ -54,11 +54,7 @@ class DataCleaner:
             self.df[f'EMA_{p}'] = self.df['price'].ewm(span=p, adjust=False).mean()
             
         print(f"Added SMA and EMA indicators for periods: {periods}")
-        
-        # Drop rows with NaNs created by rolling windows (e.g., the first 60 days)
-        initial_len = len(self.df)
-        self.df = self.df.dropna()
-        print(f"Dropped {initial_len - len(self.df)} rows containing NaNs (warm-up period).")
+
 
     def add_rsi(self, window=14):
         """
@@ -328,7 +324,7 @@ class DataCleaner:
         self.df = self.df.reindex(full_range)
         
         # 4. Handle Missing Values (Forward Fill)
-        for col in ['price', 'volume']:
+        for col in ['price', 'volume', 'open', 'high', 'low']:
             if col in self.df.columns:
                 missing_count = self.df[col].isna().sum()
                 if missing_count > 0:

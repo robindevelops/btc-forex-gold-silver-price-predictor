@@ -9,7 +9,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from src.data.preprocessing import DataCleaner, create_sequences
 from config import MODELS_DIR, BEST_LSTM_CONFIG
-from tensorflow.keras.models import load_model
+
+try:
+    import tensorflow as tf
+    HAS_TF = True
+except (ImportError, OSError, PermissionError):
+    HAS_TF = False
+
+if HAS_TF:
+    from tensorflow.keras.models import load_model
 
 class TestCryptoPipeline(unittest.TestCase):
     
@@ -65,6 +73,7 @@ class TestCryptoPipeline(unittest.TestCase):
         self.assertEqual(X.shape, (expected_samples, seq_len, 5), "Sequence X shape (3D tensor) is incorrect.")
         self.assertEqual(y.shape, (expected_samples, 1), "Sequence y target shape is incorrect.")
         
+    @unittest.skipIf(not HAS_TF, "TensorFlow not installed")
     def test_model_loading_and_prediction(self):
         """Tests if the saved Keras model can be loaded and successfully run inference."""
         model_path = os.path.join(MODELS_DIR, 'btc_lstm_final.keras')

@@ -4,7 +4,7 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 
 def build_lstm_model(seq_len, n_features, learning_rate=0.001,
-                     lstm_units=50, dense_units=25, dropout_rate=0.2):
+                     lstm_units=100, dense_units=50, dropout_rate=0.1):
     """
     Build and compile an LSTM model for price prediction.
     
@@ -20,11 +20,12 @@ def build_lstm_model(seq_len, n_features, learning_rate=0.001,
         tf.keras.models.Sequential: Compiled LSTM model.
     """
     model = Sequential([
-        LSTM(lstm_units, return_sequences=True, input_shape=(seq_len, n_features)),
+        tf.keras.layers.Input(shape=(seq_len, n_features)),
+        LSTM(lstm_units, return_sequences=True),
         Dropout(dropout_rate),
         LSTM(lstm_units, return_sequences=False),
         Dropout(dropout_rate),
-        Dense(dense_units),
+        Dense(dense_units, activation='relu'),
         Dense(1)
     ])
     
@@ -33,8 +34,17 @@ def build_lstm_model(seq_len, n_features, learning_rate=0.001,
     return model
 
 if __name__ == "__main__":
+    import sys
+    import os
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+    from config import BEST_LSTM_CONFIG
+    
     # Verify the model architecture
-    seq_len = 60
+    seq_len = BEST_LSTM_CONFIG['seq_len']
     n_features = 5
-    model = build_lstm_model(seq_len, n_features)
+    model = build_lstm_model(seq_len, n_features,
+                             lstm_units=BEST_LSTM_CONFIG['lstm_units'],
+                             dense_units=BEST_LSTM_CONFIG['dense_units'],
+                             dropout_rate=BEST_LSTM_CONFIG['dropout_rate'])
     model.summary()
+

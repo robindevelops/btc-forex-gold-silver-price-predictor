@@ -32,8 +32,13 @@ def fetch_forex_data(asset_name):
     filename = os.path.join(RAW_DATA_DIR, config['filename'])
     
     # Fetch data
-    ticker = yf.Ticker(ticker_symbol)
-    df = ticker.history(period="3y") # 3 years to match default or max
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        df = ticker.history(period="3y") # 3 years to match default or max
+    except Exception as e:
+        print(f"Network error fetching data for {asset_name}: {e}")
+        # Return empty DataFrame with expected columns on failure
+        return pd.DataFrame(columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
     
     # Reset index to get Date as a column
     df = df.reset_index()

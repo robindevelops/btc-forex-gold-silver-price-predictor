@@ -179,6 +179,10 @@ def run_xgboost(asset_name='Bitcoin', n_estimators=200):
     Trains an XGBoost Regressor baseline on the given asset and
     evaluates RMSE, MAE, R² on the test set.
     """
+    if not HAS_XGBOOST:
+        print("WARNING: XGBoost is not installed. Skipping XGBoost baseline.")
+        return None
+
     prefix = 'btc' if asset_name == 'Bitcoin' else asset_name.lower()
 
     X_train = np.load(os.path.join(PROCESSED_DATA_DIR, f"{prefix}_X_train.npy"))
@@ -300,6 +304,10 @@ if __name__ == "__main__":
 
         rf_metrics = run_random_forest(asset)
         all_metrics.append(rf_metrics)
+
+        xgb_metrics = run_xgboost(asset)
+        if xgb_metrics is not None:
+            all_metrics.append(xgb_metrics)
 
         gb_metrics = run_gradient_boosting(asset)
         all_metrics.append(gb_metrics)

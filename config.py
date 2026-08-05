@@ -7,6 +7,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_DATA_DIR = os.path.join(BASE_DIR, 'data', 'raw')
 PROCESSED_DATA_DIR = os.path.join(BASE_DIR, 'data', 'processed')
 MODELS_DIR = os.path.join(BASE_DIR, 'data', 'models')
+RESULTS_DIR = os.path.join(BASE_DIR, 'results')
 
 # Data sources configuration
 ASSET_CONFIG = {
@@ -65,6 +66,14 @@ BEST_GRU_CONFIG = {
     'epochs': 150
 }
 
+BEST_CATBOOST_CONFIG = {
+    'iterations': 500,
+    'learning_rate': 0.03,
+    'depth': 6,
+    'eval_metric': 'RMSE',
+    'random_seed': 42
+}
+
 # Cross-Validation Configuration (Week 6)
 CV_FOLDS = 3  # 3 folds to balance robust evaluation with deep learning training times
 
@@ -80,12 +89,13 @@ MODEL_STATUS = {
     'Gold': {
         'primary_model': 'stacked_ensemble',
         'model_file': 'gold_meta_model.pkl',
-        'base_models': ['gold_gru_final.keras', 'gold_lgbm_final.pkl'],
+        'base_models': ['gold_gru_final.keras', 'gold_lgbm_final.pkl', 'gold_catboost_final.cbm'],
         'status': 'active',
     },
     'Silver': {
-        'primary_model': 'gru',
-        'model_file': 'silver_gru_final.keras',
+        'primary_model': 'stacked_ensemble',
+        'model_file': 'silver_meta_model.pkl',
+        'base_models': ['silver_gru_final.keras', 'silver_lgbm_final.pkl', 'silver_catboost_final.cbm'],
         'status': 'active',
     },
 }

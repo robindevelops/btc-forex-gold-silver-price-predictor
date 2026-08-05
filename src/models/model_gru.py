@@ -12,7 +12,7 @@ from tensorflow.keras.layers import GRU, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 
 def build_gru_model(seq_len, n_features, learning_rate=0.001,
-                    gru_units=50, dense_units=25, dropout_rate=0.2):
+                    gru_units=100, dense_units=50, dropout_rate=0.1):
     """
     Build and compile a GRU model for price prediction.
     
@@ -28,11 +28,12 @@ def build_gru_model(seq_len, n_features, learning_rate=0.001,
         tf.keras.models.Sequential: Compiled GRU model.
     """
     model = Sequential([
-        GRU(gru_units, return_sequences=True, input_shape=(seq_len, n_features)),
+        tf.keras.layers.Input(shape=(seq_len, n_features)),
+        GRU(gru_units, return_sequences=True),
         Dropout(dropout_rate),
         GRU(gru_units, return_sequences=False),
         Dropout(dropout_rate),
-        Dense(dense_units),
+        Dense(dense_units, activation='relu'),
         Dense(1)
     ])
     

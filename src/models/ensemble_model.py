@@ -22,10 +22,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from config import MODELS_DIR, PROCESSED_DATA_DIR, BEST_LSTM_CONFIG, BEST_GRU_CONFIG, BEST_LGBM_CONFIG
 from src.data.preprocessing import create_sequences
 from src.utils.inverse_transform import reconstruct_price
-from src.models.catboost_model import train_catboost
 from src.models.model_lgbm import build_lgbm_model
 from src.models.model_gru import build_gru_model
-from src.models.advanced_models import train_neuralforecast_model
 
 # We use the previous keras callbacks for GRU
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
@@ -60,9 +58,9 @@ def evaluate_asset_ensemble(asset_name, seq_len=30, n_splits=3):
     model_names = []
     
     if asset_name == 'Bitcoin':
-        model_names = ['PatchTST', 'LightGBM']
+        model_names = ['GRU', 'LightGBM']
     elif asset_name == 'Gold':
-        model_names = ['TFT', 'CatBoost']
+        model_names = ['GRU', 'CatBoost']
     elif asset_name == 'Silver':
         model_names = ['LightGBM', 'CatBoost', 'GRU']
 
@@ -98,15 +96,8 @@ def evaluate_asset_ensemble(asset_name, seq_len=30, n_splits=3):
                 oof_preds[i][val_idx] = preds.ravel()
                 
             elif m_name == 'GRU':
-                gru = build_gru_model(seq_len=seq_len, n_features=X_train_fold.shape[2], **BEST_GRU_CONFIG)
-                gru.fit(X_train_fold, y_train_fold, epochs=5, batch_size=16, verbose=0)
-                preds = gru.predict(X_val_fold, verbose=0)
-                oof_preds[i][val_idx] = preds.ravel()
-                
-            elif m_name in ['PatchTST', 'TFT']:
-                # For deep sequence models, we approximate their OOF with GRU to save 3 hours of training time
-                # The meta-model weights will still correctly blend a deep-sequence + tree-tabular
-                gru = build_gru_model(seq_len=seq_len, n_features=X_train_fold.shape[2], **BEST_GRU_CONFIG)
+                gru_cfg = {k: v for k, v in BEST_GRU_CONFIG.items() if k not in ['seq_len', 'batch_size', 'epochs', 'patience']}
+                gru = build_gru_model(seq_len=seq_len, n_features=X_train_fold.shape[2], **gru_cfg)
                 gru.fit(X_train_fold, y_train_fold, epochs=5, batch_size=16, verbose=0)
                 preds = gru.predict(X_val_fold, verbose=0)
                 oof_preds[i][val_idx] = preds.ravel()

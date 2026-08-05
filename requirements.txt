@@ -24,5 +24,18 @@ matplotlib==3.9.4
 plotly==6.7.0
 streamlit==1.50.0
 
+# Technical Analysis
+ta>=0.11.0
+
+# Gradient Boosting
+catboost>=1.2.0
+
+# API
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# Testing
+pytest>=7.0.0
+
 # Notebooks
 jupyter==1.1.1

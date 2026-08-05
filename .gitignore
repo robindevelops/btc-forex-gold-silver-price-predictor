@@ -26,3 +26,19 @@ data/processed/*
 !data/processed/.gitkeep
 data/models/*
 !data/models/.gitkeep
+
+# Testing and coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Build and distribution
+*.egg-info/
+dist/
+build/
+
+# Types
+.mypy_cache/
+
+# Logs
+*.log

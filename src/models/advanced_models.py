@@ -1,110 +1,143 @@
-import os
-import pandas as pd
+"""
+Advanced Models Factory Module.
+Provides factory functions for creating, training, and predicting with 
+GRU, LightGBM, and CatBoost models.
+"""
+
+import logging
+from typing import Any, Tuple, Optional
 import numpy as np
-import torch
-from neuralforecast import NeuralForecast
-from neuralforecast.models import PatchTST, TFT, NBEATS
-from neuralforecast.losses.pytorch import MSE
-from config import MODELS_DIR, BEST_LSTM_CONFIG
 
-def create_nf_dataset(X, y, asset_name):
-    """
-    Converts 3D sequence data (samples, seq_len, features) into the 
-    long-format DataFrame required by NeuralForecast.
-    Format required: ['unique_id', 'ds', 'y', 'feature_1', 'feature_2', ...]
-    """
-    # For PyTorch models, we need a flat history for each 'unique_id'
-    # Since we pre-sliced into windows of length 30, it's easier to just take the raw time series
-    # But to match our Keras pipeline, we can construct independent series.
-    # Actually, NeuralForecast natively handles windowing. 
-    # The best approach is to rebuild the dataframe from the raw scaled features
-    # rather than the pre-sliced 3D arrays to utilize NeuralForecast's optimized dataloaders.
-    pass
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+from src.models.model_gru import build_gru_model
+from src.models.model_lgbm import build_lgbm_model
+from src.models.catboost_model import train_catboost
+from config import BEST_GRU_CONFIG, BEST_LGBM_CONFIG
 
 
-def train_neuralforecast_model(train_df, val_df, asset_name, model_type="PatchTST"):
+def get_model(model_type: str, **kwargs: Any) -> Any:
     """
-    Trains a state-of-the-art NeuralForecast model.
+    Factory function to get an instance of the specified model.
+    
     Args:
-        train_df: The fully scaled training DataFrame (indexed by timestamp)
-        val_df: The fully scaled validation DataFrame (indexed by timestamp)
-        asset_name: Name of the asset
-        model_type: "PatchTST", "TFT", or "NBEATS"
+        model_type: "GRU", "LightGBM", or "CatBoost"
+        **kwargs: Additional parameters to override defaults
+        
+    Returns:
+        The instantiated model.
     """
-    print(f"\n{'='*50}\n  TRAINING {model_type} MODEL ({asset_name})\n{'='*50}")
-    
-    # 1. Prepare Data format
-    # NeuralForecast expects: unique_id, ds (datetime/int), y, and exogenous features
-    def format_nf(df, uid):
-        nf_df = df.copy()
-        nf_df['unique_id'] = uid
-        nf_df = nf_df.reset_index()
-        nf_df = nf_df.rename(columns={'timestamp': 'ds', 'price': 'y'})
-        # Select target and features
-        cols = ['unique_id', 'ds', 'y'] + [c for c in nf_df.columns if c not in ['unique_id', 'ds', 'y']]
-        return nf_df[cols]
-
-    nf_train = format_nf(train_df, asset_name)
-    nf_val = format_nf(val_df, asset_name)
-    
-    exogenous_features = [c for c in nf_train.columns if c not in ['unique_id', 'ds', 'y']]
-    
-    seq_len = BEST_LSTM_CONFIG['seq_len']  # 30 days lookback
-    horizon = 1  # 1 day ahead forecast
-    
-    # 2. Define Model
-    if model_type == "PatchTST":
-        model = PatchTST(
-            h=horizon,
-            input_size=seq_len,
-            patch_len=8,
-            stride=8,
-            hidden_size=64,
-            n_heads=4,
-            loss=MSE(),
-            max_steps=500,
-            val_check_steps=50,
-            early_stop_patience_steps=10
-        )
-    elif model_type == "TFT":
-        model = TFT(
-            h=horizon,
-            input_size=seq_len,
-            hist_exog_list=exogenous_features,
-            hidden_size=64,
-            loss=MSE(),
-            max_steps=500,
-            val_check_steps=50,
-            early_stop_patience_steps=10
-        )
-    elif model_type == "NBEATS":
-        model = NBEATS(
-            h=horizon,
-            input_size=seq_len,
-            loss=MSE(),
-            max_steps=500,
-            val_check_steps=50,
-            early_stop_patience_steps=10
-        )
+    if model_type == "GRU":
+        seq_len = kwargs.get('seq_len', 30)
+        n_features = kwargs.get('n_features', 1)
+        config = {k: v for k, v in BEST_GRU_CONFIG.items() if k not in ['seq_len', 'batch_size', 'epochs', 'patience']}
+        for k, v in kwargs.items():
+            if k in config:
+                config[k] = v
+        return build_gru_model(seq_len=seq_len, n_features=n_features, **config)
+    elif model_type == "LightGBM":
+        config = BEST_LGBM_CONFIG.copy()
+        for k, v in kwargs.items():
+            if k in config:
+                config[k] = v
+        return build_lgbm_model(**config)
+    elif model_type == "CatBoost":
+        from catboost import CatBoostRegressor
+        # Using a default configured CatBoost model
+        iterations = kwargs.get('iterations', 100)
+        learning_rate = kwargs.get('learning_rate', 0.05)
+        depth = kwargs.get('depth', 6)
+        return CatBoostRegressor(iterations=iterations, learning_rate=learning_rate, depth=depth, verbose=0)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 
-    # 3. Train Model
-    nf = NeuralForecast(models=[model], freq='D')
+
+def train_model(model: Any, X_train: np.ndarray, y_train: np.ndarray, 
+                X_val: Optional[np.ndarray], y_val: Optional[np.ndarray], 
+                model_type: str, **kwargs: Any) -> Any:
+    """
+    Trains the specified model.
     
-    # Concatenate train and val for NeuralForecast (it handles splitting internally based on sizes)
-    # Actually we can just fit on train, but we want validation early stopping.
-    nf.fit(df=nf_train, val_size=len(nf_val))
+    Args:
+        model: The model to train.
+        X_train: Training features.
+        y_train: Training targets.
+        X_val: Validation features (optional).
+        y_val: Validation targets (optional).
+        model_type: Type of the model ("GRU", "LightGBM", "CatBoost").
+        **kwargs: Additional training parameters (e.g. epochs, batch_size, callbacks).
+        
+    Returns:
+        The trained model.
+    """
+    logger.info(f"Training {model_type} model...")
+    if model_type == "GRU":
+        epochs = kwargs.get('epochs', BEST_GRU_CONFIG.get('epochs', 20))
+        batch_size = kwargs.get('batch_size', BEST_GRU_CONFIG.get('batch_size', 16))
+        callbacks = kwargs.get('callbacks', [])
+        
+        if X_val is not None and y_val is not None:
+            model.fit(X_train, y_train, validation_data=(X_val, y_val), 
+                      epochs=epochs, batch_size=batch_size, callbacks=callbacks, verbose=0)
+        else:
+            model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, callbacks=callbacks, verbose=0)
+        return model
+    elif model_type == "LightGBM":
+        # Ensure 2D input for tabular models
+        if len(X_train.shape) == 3:
+            X_tr_flat = X_train.reshape(X_train.shape[0], -1)
+            X_vl_flat = X_val.reshape(X_val.shape[0], -1) if X_val is not None else None
+        else:
+            X_tr_flat, X_vl_flat = X_train, X_val
+            
+        if X_vl_flat is not None and y_val is not None:
+            model.fit(X_tr_flat, y_train.ravel(), eval_set=[(X_vl_flat, y_val.ravel())])
+        else:
+            model.fit(X_tr_flat, y_train.ravel())
+        return model
+    elif model_type == "CatBoost":
+        if len(X_train.shape) == 3:
+            X_tr_flat = X_train[:, -1, :]  # Taking the last step like in the codebase
+            X_vl_flat = X_val[:, -1, :] if X_val is not None else None
+        else:
+            X_tr_flat, X_vl_flat = X_train, X_val
+            
+        if X_vl_flat is not None and y_val is not None:
+            model.fit(X_tr_flat, y_train.ravel(), eval_set=(X_vl_flat, y_val.ravel()))
+        else:
+            model.fit(X_tr_flat, y_train.ravel())
+        return model
+    else:
+        raise ValueError(f"Unknown model_type for training: {model_type}")
+
+
+def predict_model(model: Any, X: np.ndarray, model_type: str) -> np.ndarray:
+    """
+    Generates predictions using the specified model.
     
-    # 4. Predict on Validation to get metrics
-    # nf.predict() expects a history of length `input_size` for each prediction.
-    # To evaluate properly like Walk Forward, we need to pass the concatenated df
-    full_df = pd.concat([nf_train, nf_val])
-    # ... evaluating full sequence ...
-    
-    # Save Model
-    model_path = os.path.join(MODELS_DIR, f"{asset_name.lower()}_{model_type.lower()}")
-    nf.save(path=model_path, overwrite=True)
-    print(f"  ✅ {model_type} saved to {model_path}")
-    
-    return nf
+    Args:
+        model: The trained model.
+        X: Features to predict on.
+        model_type: Type of the model ("GRU", "LightGBM", "CatBoost").
+        
+    Returns:
+        Numpy array of predictions.
+    """
+    if model_type == "GRU":
+        return model.predict(X, verbose=0).reshape(-1, 1)
+    elif model_type == "LightGBM":
+        if len(X.shape) == 3:
+            X_flat = X.reshape(X.shape[0], -1)
+        else:
+            X_flat = X
+        return model.predict(X_flat).reshape(-1, 1)
+    elif model_type == "CatBoost":
+        if len(X.shape) == 3:
+            X_flat = X[:, -1, :]
+        else:
+            X_flat = X
+        return model.predict(X_flat).reshape(-1, 1)
+    else:
+        raise ValueError(f"Unknown model_type for prediction: {model_type}")

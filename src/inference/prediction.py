@@ -17,7 +17,9 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from config import MODELS_DIR, PROCESSED_DATA_DIR, MODEL_STATUS, BEST_LSTM_CONFIG, BEST_LGBM_CONFIG
 from src.data.preprocessing import create_sequences
 from src.utils.inverse_transform import reconstruct_price
-from tensorflow.keras.models import load_model
+from src.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 def load_inference_data(asset_name, seq_len=30):
     prefix = 'btc' if asset_name == 'Bitcoin' else asset_name.lower()
@@ -27,7 +29,10 @@ def load_inference_data(asset_name, seq_len=30):
         raise FileNotFoundError(f"Test data missing: {test_path}")
         
     test_df = pd.read_csv(test_path, index_col='timestamp', parse_dates=True)
-    scaler = joblib.load(os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl'))
+    scaler_path = os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl')
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(f"Scaler missing: {scaler_path}")
+    scaler = joblib.load(scaler_path)
     
     # Target index is either 'log_return' or 'price'
     target_idx = list(test_df.columns).index('log_return') if 'log_return' in test_df.columns else list(test_df.columns).index('price')
@@ -42,62 +47,65 @@ def load_inference_data(asset_name, seq_len=30):
 
 
 def predict_next_day(asset_name):
-    print(f"\n{'='*50}")
-    print(f"  PREDICTION INFERENCE: {asset_name.upper()}")
-    print(f"{'='*50}")
+    logger.info(f"========== PREDICTION INFERENCE: {asset_name.upper()} ==========")
     
     prefix = 'btc' if asset_name == 'Bitcoin' else asset_name.lower()
     seq_len = BEST_LSTM_CONFIG['seq_len']
     X_latest, scaler, target_idx, test_df = load_inference_data(asset_name, seq_len)
     
     status = MODEL_STATUS.get(asset_name, {})
-    best_model_type = status.get('best_model', 'Stacked Ensemble')
+    best_model_type = status.get('primary_model', 'stacked_ensemble')
     
-    print(f"  Best historical model: {best_model_type}")
+    logger.info(f"Best historical model: {best_model_type}")
     
     try:
-        if best_model_type == 'Stacked Ensemble':
+        if best_model_type == 'stacked_ensemble':
             # Load Meta-Model
-            meta_path = os.path.join(MODELS_DIR, f'{prefix}_metamodel.pkl')
+            meta_filename = status.get('model_file', f'{prefix}_meta_model.pkl')
+            meta_path = os.path.join(MODELS_DIR, meta_filename)
+            if not os.path.exists(meta_path):
+                raise FileNotFoundError(f"Meta-model missing: {meta_path}")
             meta_model = joblib.load(meta_path)
             
             base_preds = []
+            base_model_names = status.get('base_models', [])
             
-            # Predict with LightGBM
-            lgbm_path = os.path.join(MODELS_DIR, f'{prefix}_lgbm_final.pkl')
-            if os.path.exists(lgbm_path):
-                lgbm = joblib.load(lgbm_path)
-                lgbm_pred = lgbm.predict(X_latest.reshape(1, -1))[0]
-                base_preds.append(lgbm_pred)
-            
-            # Predict with CatBoost
-            cat_path = os.path.join(MODELS_DIR, f'{prefix}_catboost_final.cbm')
-            if os.path.exists(cat_path):
-                from catboost import CatBoostRegressor
-                cb = CatBoostRegressor()
-                cb.load_model(cat_path)
-                cb_pred = cb.predict(X_latest[:, -1, :])[0]
-                base_preds.append(cb_pred)
+            for base_model_file in base_model_names:
+                model_path = os.path.join(MODELS_DIR, base_model_file)
+                if not os.path.exists(model_path):
+                    logger.warning(f"Base model missing, skipping: {model_path}")
+                    continue
                 
-            # Predict with GRU (Fallback for Deep Learning)
-            gru_path = os.path.join(MODELS_DIR, f'{prefix}_gru_final.keras')
-            if os.path.exists(gru_path):
-                gru = load_model(gru_path)
-                gru_pred = gru.predict(X_latest, verbose=0)[0][0]
-                base_preds.append(gru_pred)
-                
-            # NeuralForecast models are complex to infer point-in-time dynamically without the full NeuralForecast object
-            # So if we have PatchTST or TFT, we would load it here.
-            # For this pipeline, we will use the base_preds we successfully loaded.
-            
+                if base_model_file.endswith('.pkl'):
+                    model = joblib.load(model_path)
+                    pred = model.predict(X_latest.reshape(1, -1))[0]
+                    base_preds.append(pred)
+                elif base_model_file.endswith('.cbm'):
+                    from catboost import CatBoostRegressor
+                    cb = CatBoostRegressor()
+                    cb.load_model(model_path)
+                    pred = cb.predict(X_latest[:, -1, :])[0]
+                    base_preds.append(pred)
+                elif base_model_file.endswith('.keras'):
+                    from tensorflow.keras.models import load_model
+                    model = load_model(model_path)
+                    pred = model.predict(X_latest, verbose=0)[0][0]
+                    base_preds.append(pred)
+                else:
+                    logger.warning(f"Unknown model extension for {base_model_file}")
+
             if not base_preds:
                 raise ValueError("No base models found for the ensemble!")
                 
             X_meta = np.array([base_preds])
             final_pred_scaled = meta_model.predict(X_meta)[0]
             
-        elif best_model_type == 'GRU':
-            model_path = os.path.join(MODELS_DIR, f'{prefix}_gru_final.keras')
+        elif best_model_type == 'gru':
+            model_filename = status.get('model_file', f'{prefix}_gru_final.keras')
+            model_path = os.path.join(MODELS_DIR, model_filename)
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"GRU model missing: {model_path}")
+            from tensorflow.keras.models import load_model
             model = load_model(model_path)
             final_pred_scaled = model.predict(X_latest, verbose=0)[0][0]
             
@@ -105,8 +113,8 @@ def predict_next_day(asset_name):
             raise ValueError(f"Inference not implemented for standalone model: {best_model_type}")
             
     except Exception as e:
-        print(f"  ❌ Error during inference: {e}")
-        return
+        logger.error(f"Error during inference: {e}")
+        raise e
         
     # Reconstruct to actual price
     scaled_array = np.array([[final_pred_scaled]])
@@ -115,17 +123,42 @@ def predict_next_day(asset_name):
     last_close = test_df['price'].iloc[-1]
     pct_change = ((real_price - last_close) / last_close) * 100
     
-    print(f"\n  Last Known Close Price: ${last_close:,.2f}")
-    print(f"  Predicted Next Day:     ${real_price:,.2f}")
+    logger.info(f"Last Known Close Price: ${last_close:,.2f}")
+    logger.info(f"Predicted Next Day:     ${real_price:,.2f}")
     
-    direction = "📈 UP" if pct_change > 0 else "📉 DOWN"
-    print(f"  Predicted Move:         {direction} ({pct_change:+.2f}%)")
-    print(f"{'='*50}\n")
+    direction = "UP" if pct_change > 0 else "DOWN"
+    logger.info(f"Predicted Move:         {direction} ({pct_change:+.2f}%)")
+    logger.info("=====================================================")
     
-    return real_price
+    return {
+        'asset': asset_name,
+        'current_price': float(last_close),
+        'predicted_price': float(real_price),
+        'predicted_move_pct': float(pct_change),
+        'direction': direction,
+        'model_used': best_model_type,
+        'metadata': {
+            'seq_len': seq_len,
+            'ensemble_bases': len(base_preds) if best_model_type == 'stacked_ensemble' else 1
+        }
+    }
+
+
+def predict_next_day_safe(asset_name):
+    """
+    Wrapper for predict_next_day that catches exceptions and returns None 
+    instead of crashing the pipeline.
+    """
+    try:
+        return predict_next_day(asset_name)
+    except Exception as e:
+        logger.error(f"Failed to generate prediction for {asset_name}: {e}")
+        return None
 
 
 if __name__ == "__main__":
-    predict_next_day('Bitcoin')
-    predict_next_day('Gold')
-    predict_next_day('Silver')
+    from src.utils.logging_config import setup_logging
+    setup_logging()
+    predict_next_day_safe('Bitcoin')
+    predict_next_day_safe('Gold')
+    predict_next_day_safe('Silver')

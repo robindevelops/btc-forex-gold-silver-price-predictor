@@ -16,14 +16,13 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from config import MODELS_DIR, PROCESSED_DATA_DIR, BEST_LSTM_CONFIG, BEST_LGBM_CONFIG
+from config import MODELS_DIR, PROCESSED_DATA_DIR, BEST_LSTM_CONFIG, BEST_LGBM_CONFIG, BEST_GRU_CONFIG
 from src.models.model_lgbm import build_lgbm_model, save_lgbm_model
+from src.models.model_gru import build_gru_model
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from src.data.preprocessing import create_sequences
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from src.utils.inverse_transform import reconstruct_price
-
-# Import the new advanced models wrapper
-from src.models.advanced_models import train_neuralforecast_model
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
@@ -57,7 +56,7 @@ def build_sequences(seq_len):
 if __name__ == "__main__":
     cfg = BEST_LSTM_CONFIG
     print(f"\n{'='*50}")
-    print("  TRAINING FINAL BTC MODEL (PatchTST + LightGBM)")
+    print("  TRAINING FINAL BTC MODEL (GRU + LightGBM)")
     print(f"{'='*50}")
     
     print("\n  Building continuous sequences...")
@@ -66,14 +65,43 @@ if __name__ == "__main__":
     scaler = joblib.load(os.path.join(MODELS_DIR, 'btc_scaler.pkl'))
     
     # ---------------------------------------------------------
-    # 1. Train PatchTST (Deep Sequence Model)
+    # 1. Train GRU (Deep Sequence Model)
     # ---------------------------------------------------------
-    # We pass the raw dataframes to NeuralForecast to let it build the time-series patches natively
-    # We train on Train and validate on Val
-    nf_model = train_neuralforecast_model(train_df, val_df, asset_name="Bitcoin", model_type="PatchTST")
+    print("\n" + "="*50)
+    print("  TRAINING GRU MODEL")
+    print("="*50)
+
+    gru_cfg = {k: v for k, v in BEST_GRU_CONFIG.items() if k not in ['seq_len', 'batch_size', 'epochs', 'patience']}
+    model_gru = build_gru_model(seq_len=cfg['seq_len'], n_features=X_train.shape[2], **gru_cfg)
+
+    early_stop = EarlyStopping(monitor='val_loss', patience=BEST_GRU_CONFIG.get('patience', 10), restore_best_weights=True)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
+
+    # Phase 1: Train with validation to find optimal epochs
+    history = model_gru.fit(
+        X_train, y_train,
+        validation_data=(X_val, y_val),
+        epochs=BEST_GRU_CONFIG.get('epochs', 50),
+        batch_size=BEST_GRU_CONFIG.get('batch_size', 32),
+        callbacks=[early_stop, reduce_lr],
+        verbose=1
+    )
     
-    # Note: Proper test set evaluation for NeuralForecast requires formatting the test set and passing historical context.
-    # We will let the ensemble_model.py handle the formal WFCV evaluation.
+    optimal_epochs = max(1, len(history.history['loss']) - BEST_GRU_CONFIG.get('patience', 10))
+    print(f"  Optimal epochs found: {optimal_epochs}")
+    
+    # Phase 2: Retrain on Train+Val
+    model_gru = build_gru_model(seq_len=cfg['seq_len'], n_features=X_tr.shape[2], **gru_cfg)
+    model_gru.fit(
+        X_tr, y_tr,
+        epochs=optimal_epochs,
+        batch_size=BEST_GRU_CONFIG.get('batch_size', 32),
+        verbose=1
+    )
+    
+    gru_path = os.path.join(MODELS_DIR, 'btc_gru_final.keras')
+    model_gru.save(gru_path)
+    print(f"  ✅ GRU saved to {gru_path}")
     
     # ---------------------------------------------------------
     # 2. Train LightGBM (Tabular Model)

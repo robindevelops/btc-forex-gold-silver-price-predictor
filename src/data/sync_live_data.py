@@ -8,12 +8,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from config import PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG
 from src.data.preprocessing import DataCleaner
+from src.data.external_data import fetch_all_external_data
 
 def update_live_data(asset_name):
     """
     Fetches the latest data from Yahoo Finance, applies technical indicators,
     and scales it using the EXISTING scaler to prevent data leakage.
     """
+    
+    # Sync external data before preprocessing
+    fetch_all_external_data()
+    
     # 1. Fetch from yFinance
     try:
         config = ASSET_CONFIG.get(asset_name)
@@ -50,8 +55,16 @@ def update_live_data(asset_name):
         scaler = joblib.load(scaler_path)
         feature_cols = list(cleaner.df.columns)
         
-        scaled_array = scaler.transform(cleaner.df[feature_cols])
-        scaled_df = pd.DataFrame(scaled_array, columns=feature_cols, index=cleaner.df.index)
+        if len(feature_cols) != scaler.n_features_in_:
+            print(f"Feature count mismatch for {asset_name}: scaler expects {scaler.n_features_in_}, got {len(feature_cols)}.")
+            return False
+            
+        try:
+            scaled_array = scaler.transform(cleaner.df[feature_cols])
+            scaled_df = pd.DataFrame(scaled_array, columns=feature_cols, index=cleaner.df.index)
+        except Exception as e:
+            print(f"Error scaling data for {asset_name}: {e}")
+            return False
         
         # Save as a specific live_scaled.csv file
         live_path = os.path.join(PROCESSED_DATA_DIR, f'{prefix}_live_scaled.csv')
