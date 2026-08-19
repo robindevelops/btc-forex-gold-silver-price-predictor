@@ -111,11 +111,11 @@ if __name__ == "__main__":
     print("="*50)
     
     lgbm_cfg = BEST_LGBM_CONFIG
-    # Flatten sequences for LightGBM
-    X_train_flat = X_train.reshape(X_train.shape[0], -1)
-    X_val_flat = X_val.reshape(X_val.shape[0], -1)
-    X_tr_flat = X_tr.reshape(X_tr.shape[0], -1)
-    X_test_flat = X_test.reshape(X_test.shape[0], -1)
+    # Use only the last day's features for LightGBM
+    X_train_flat = X_train[:, -1, :]
+    X_val_flat = X_val[:, -1, :]
+    X_tr_flat = X_tr[:, -1, :]
+    X_test_flat = X_test[:, -1, :]
     
     model_lgbm = build_lgbm_model(
         n_estimators=lgbm_cfg['n_estimators'],

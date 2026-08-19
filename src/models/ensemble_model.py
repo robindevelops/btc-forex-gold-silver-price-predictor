@@ -84,8 +84,8 @@ def evaluate_asset_ensemble(asset_name, seq_len=30, n_splits=3):
         for i, m_name in enumerate(model_names):
             if m_name == 'LightGBM':
                 lgbm = build_lgbm_model(**BEST_LGBM_CONFIG)
-                lgbm.fit(X_train_fold.reshape(X_train_fold.shape[0], -1), y_train_fold.ravel())
-                preds = lgbm.predict(X_val_fold.reshape(X_val_fold.shape[0], -1)).reshape(-1,1)
+                lgbm.fit(X_train_fold[:, -1, :], y_train_fold.ravel())
+                preds = lgbm.predict(X_val_fold[:, -1, :]).reshape(-1,1)
                 oof_preds[i][val_idx] = preds.ravel()
                 
             elif m_name == 'CatBoost':

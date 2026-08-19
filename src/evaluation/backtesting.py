@@ -102,13 +102,13 @@ def eval_naive(asset):
     return metrics
 
 
-def eval_lstm(asset):
-    """Load final LSTM, walk-forward 1-step-ahead on test set."""
+def eval_gru(asset):
+    """Load final GRU, walk-forward 1-step-ahead on test set."""
     prefix = get_prefix(asset)
     cfg = BEST_LSTM_CONFIG
     seq_len = cfg['seq_len']
     
-    model = load_model(os.path.join(MODELS_DIR, f'{prefix}_lstm_final.keras'))
+    model = load_model(os.path.join(MODELS_DIR, f'{prefix}_gru_final.keras'))
     scaler = joblib.load(os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl'))
     
     train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'),
@@ -139,13 +139,13 @@ def eval_lstm(asset):
     
     test_actual, prev, _ = get_test_prices(asset)
     metrics = compute_all_metrics(test_actual, pred_usd, prev)
-    metrics['Model'] = 'LSTM (Optimized)'
+    metrics['Model'] = 'GRU (Optimized)'
     metrics['Asset'] = asset
     return metrics, pred_usd
 
 
 def eval_arima(asset):
-    """Fit ARIMA(1,1,0), forecast test period."""
+    """Fit ARIMA(1,1,0), walk-forward 1-step-ahead on test set."""
     prefix = get_prefix(asset)
     df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_features.csv'),
                      index_col='timestamp', parse_dates=True)
@@ -158,7 +158,15 @@ def eval_arima(asset):
     
     model = ARIMA(train_val, order=(1, 1, 0))
     fitted = model.fit()
-    forecast = fitted.forecast(steps=len(test)).values
+    
+    # 1-step ahead walk-forward forecast
+    forecast = []
+    for t in range(len(test)):
+        yhat = fitted.forecast(steps=1).iloc[0]
+        forecast.append(yhat)
+        fitted = fitted.append([test.iloc[t]], refit=False)
+        
+    forecast = np.array(forecast)
     
     test_actual, prev, _ = get_test_prices(asset)
     metrics = compute_all_metrics(test_actual, forecast, prev)
@@ -172,13 +180,25 @@ def eval_baseline(asset, model_type):
     prefix = get_prefix(asset)
     scaler = joblib.load(os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl'))
     
-    X_train = np.load(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_X_train.npy'))
-    y_train = np.load(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_y_train.npy'))
-    X_test = np.load(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_X_test.npy'))
-    y_test = np.load(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_y_test.npy'))
+    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'), index_col='timestamp', parse_dates=True)
+    val_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_val_scaled.csv'), index_col='timestamp', parse_dates=True)
+    test_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_test_scaled.csv'), index_col='timestamp', parse_dates=True)
     
-    X_train_flat = X_train.reshape(X_train.shape[0], -1)
-    X_test_flat = X_test.reshape(X_test.shape[0], -1)
+    full_df = pd.concat([train_df, val_df, test_df])
+    seq_len = BEST_LSTM_CONFIG['seq_len']
+    X, y = create_sequences(full_df, seq_len=seq_len)
+    
+    L_train = len(train_df)
+    L_val = len(val_df)
+    split_1 = L_train - seq_len
+    split_2 = L_train + L_val - seq_len
+    
+    X_train, y_train = X[:split_1], y[:split_1]
+    X_test, y_test = X[split_2:], y[split_2:]
+    
+    # Use 2D tabular features (last day of the sequence)
+    X_train_flat = X_train[:, -1, :]
+    X_test_flat = X_test[:, -1, :]
     
     if model_type == 'LinearRegression':
         model = LinearRegression()
@@ -190,39 +210,31 @@ def eval_baseline(asset, model_type):
     model.fit(X_train_flat, y_train.ravel())
     y_pred = model.predict(X_test_flat).reshape(-1, 1)
     
-    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'), index_col=0, nrows=1)
     target_idx = list(train_df.columns).index('log_return') if 'log_return' in train_df.columns else 0
     
     y_test_real = reconstruct_price(y_test, X_test, scaler, target_idx)
     y_pred_real = reconstruct_price(y_pred, X_test, scaler, target_idx)
     
-    # For directional accuracy we need "previous day" in USD
-    # The baselines use the .npy files, different test set alignment
-    # We'll compute directional accuracy relative to the first value in each sequence
-    # (last price the model "saw")
-    last_seen_scaled = X_test[:, -1, 0]  # last timestep, price column (index 0)
-    n_features = X_test.shape[2]
-    dummy_x = np.zeros((len(last_seen_scaled), n_features))
-    dummy_x[:, 0] = last_seen_scaled
-    last_seen_real = scaler.inverse_transform(dummy_x)[:, 0]
+    # Correct alignment: test_actual exactly matches y_test_real
+    test_actual, prev, _ = get_test_prices(asset)
     
-    metrics = compute_all_metrics(y_test_real, y_pred_real, last_seen_real)
+    metrics = compute_all_metrics(test_actual, y_pred_real, prev)
     metrics['Model'] = label
     metrics['Asset'] = asset
     return metrics
 
 
-def eval_ensemble(asset, lstm_pred, arima_pred):
-    """Weighted ensemble: 0.3*ARIMA + 0.7*LSTM (aligned on matching length)."""
+def eval_ensemble(asset, gru_pred, arima_pred):
+    """Weighted ensemble: 0.3*ARIMA + 0.7*GRU (aligned on matching length)."""
     test_actual, prev, _ = get_test_prices(asset)
     
-    min_len = min(len(lstm_pred), len(arima_pred), len(test_actual))
+    min_len = min(len(gru_pred), len(arima_pred), len(test_actual))
     a = test_actual[:min_len]
     p = prev[:min_len]
-    ens = 0.3 * arima_pred[:min_len] + 0.7 * lstm_pred[:min_len]
+    ens = 0.3 * arima_pred[:min_len] + 0.7 * gru_pred[:min_len]
     
     metrics = compute_all_metrics(a, ens, p)
-    metrics['Model'] = 'Ensemble (0.3A+0.7L)'
+    metrics['Model'] = 'Ensemble (0.3A+0.7G)'
     metrics['Asset'] = asset
     return metrics
 
@@ -251,10 +263,10 @@ if __name__ == "__main__":
         print(f"  -> Naive forecast")
         all_results.append(eval_naive(asset))
         
-        # LSTM
-        print(f"  -> LSTM (walk-forward)")
-        lstm_metrics, lstm_pred = eval_lstm(asset)
-        all_results.append(lstm_metrics)
+        # GRU
+        print(f"  -> GRU (walk-forward)")
+        gru_metrics, gru_pred = eval_gru(asset)
+        all_results.append(gru_metrics)
         
         # ARIMA
         print(f"  -> ARIMA(1,1,0)")
@@ -263,7 +275,7 @@ if __name__ == "__main__":
         
         # Ensemble
         print(f"  -> Ensemble")
-        all_results.append(eval_ensemble(asset, lstm_pred, arima_pred))
+        all_results.append(eval_ensemble(asset, gru_pred, arima_pred))
         
         # Baselines
         print(f"  -> Linear Regression")
@@ -343,8 +355,8 @@ if __name__ == "__main__":
     # ═══════════════════════════════════════════════════════════
     
     fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
-    colors = {'LSTM (Optimized)': '#2196F3', 'ARIMA(1,1,0)': '#FF9800',
-              'Ensemble (0.3A+0.7L)': '#E91E63', 'Naive (t=t-1)': '#9E9E9E',
+    colors = {'GRU (Optimized)': '#2196F3', 'ARIMA(1,1,0)': '#FF9800',
+              'Ensemble (0.3A+0.7G)': '#E91E63', 'Naive (t=t-1)': '#9E9E9E',
               'Linear Regression': '#4CAF50', 'Random Forest': '#795548'}
     
     for idx, asset in enumerate(['Bitcoin', 'Gold', 'Silver']):

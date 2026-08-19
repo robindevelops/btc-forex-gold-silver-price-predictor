@@ -632,6 +632,44 @@ with tab1:
                                 )
                                 st.plotly_chart(fig_pred, use_container_width=True)
 
+                                # ── Added: Returns Scatter Plot (Honest Evaluation) ──
+                                st.markdown("##### True Variance: Actual vs Predicted Returns")
+                                st.markdown("*(This isolates the model's actual predictive power from the 'shadowing' effect of raw prices)*")
+                                
+                                dummy_y_actual = np.zeros((len(y_recent), n_features))
+                                dummy_y_actual[:, target_idx] = y_recent.ravel()
+                                actual_returns = scaler.inverse_transform(dummy_y_actual)[:, target_idx] * 100 # %
+
+                                dummy_y_pred = np.zeros((len(y_pred_scaled), n_features))
+                                dummy_y_pred[:, target_idx] = y_pred_scaled.ravel()
+                                pred_returns = scaler.inverse_transform(dummy_y_pred)[:, target_idx] * 100 # %
+
+                                fig_scatter = go.Figure()
+                                fig_scatter.add_trace(go.Scatter(
+                                    x=actual_returns, y=pred_returns, mode='markers',
+                                    marker=dict(color='#00ffcc', size=8, opacity=0.7),
+                                    name='Returns'
+                                ))
+                                
+                                # Add ideal diagonal line
+                                min_val = min(min(actual_returns), min(pred_returns))
+                                max_val = max(max(actual_returns), max(pred_returns))
+                                fig_scatter.add_trace(go.Scatter(
+                                    x=[min_val, max_val], y=[min_val, max_val], mode='lines',
+                                    line=dict(color='red', dash='dash'), name='Perfect Prediction'
+                                ))
+
+                                fig_scatter.update_layout(
+                                    template="plotly_dark",
+                                    plot_bgcolor="rgba(0,0,0,0)",
+                                    paper_bgcolor="rgba(0,0,0,0)",
+                                    xaxis=dict(title="Actual Return (%)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
+                                    yaxis=dict(title="Predicted Return (%)", showgrid=True, gridcolor="rgba(255,255,255,0.1)"),
+                                    height=400,
+                                    margin=dict(l=0, r=0, t=30, b=0)
+                                )
+                                st.plotly_chart(fig_scatter, use_container_width=True)
+
                     else:
                         st.error(
                             f"Could not generate prediction with {selected_model}. "

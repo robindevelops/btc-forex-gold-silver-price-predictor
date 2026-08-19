@@ -40,20 +40,18 @@ class DataCleaner:
 
     def add_moving_averages(self):
         """
-        Calculates Simple Moving Averages (SMA) and Exponential Moving Averages (EMA)
-        for standard periods: 7, 14, 30, 60 days.
+        Calculates Exponential Moving Averages (EMA) for 14 and 30 days.
+        Removed redundant SMAs and highly correlated timescales.
         """
         if self.df is None:
             return
             
-        periods = [7, 14, 30, 60]
+        periods = [14, 30]
         for p in periods:
-            # Simple Moving Average
-            self.df[f'SMA_{p}'] = self.df['price'].rolling(window=p).mean()
             # Exponential Moving Average
             self.df[f'EMA_{p}'] = self.df['price'].ewm(span=p, adjust=False).mean()
             
-        print(f"Added SMA and EMA indicators for periods: {periods}")
+        print(f"Added EMA indicators for periods: {periods}")
 
 
     def add_rsi(self, window=14):
@@ -96,8 +94,7 @@ class DataCleaner:
     def add_advanced_ta(self):
         """
         Adds advanced technical indicators using the 'ta' library.
-        Includes: Bollinger Bands, VWAP, Stochastic Oscillator, Williams %R, 
-        ADX, CCI, ROC, and ATR.
+        Includes: Bollinger Bands, VWAP, ADX, ROC, and ATR.
         """
         if self.df is None:
             return
@@ -120,33 +117,16 @@ class DataCleaner:
             high=self.df['high'], low=self.df['low'], close=self.df['price'], volume=self.df['volume'], window=14
         )
         
-        # Stochastic Oscillator
-        stoch = ta.momentum.StochasticOscillator(
-            high=self.df['high'], low=self.df['low'], close=self.df['price'], window=14, smooth_window=3
-        )
-        self.df['Stoch_K'] = stoch.stoch()
-        self.df['Stoch_D'] = stoch.stoch_signal()
-        
-        # Williams %R
-        self.df['Williams_R'] = ta.momentum.williams_r(
-            high=self.df['high'], low=self.df['low'], close=self.df['price'], lbp=14
-        )
-        
         # ADX
         adx = ta.trend.ADXIndicator(
             high=self.df['high'], low=self.df['low'], close=self.df['price'], window=14
         )
         self.df['ADX'] = adx.adx()
         
-        # CCI
-        self.df['CCI'] = ta.trend.cci(
-            high=self.df['high'], low=self.df['low'], close=self.df['price'], window=20
-        )
-        
         # ROC
         self.df['ROC'] = ta.momentum.roc(close=self.df['price'], window=12)
         
-        print("Added advanced TA features: BB, ATR, VWAP, Stoch, Williams %R, ADX, CCI, ROC.")
+        print("Added advanced TA features: BB, ATR, VWAP, ADX, ROC.")
 
     def add_lag_returns(self, lags=None):
         """
@@ -257,7 +237,7 @@ class DataCleaner:
             if os.path.exists(ext_path):
                 ext_df = pd.read_csv(ext_path, parse_dates=['timestamp'])
                 ext_df = ext_df.set_index('timestamp')
-                ext_df = ext_df.reindex(self.df.index).ffill().bfill()
+                ext_df = ext_df.reindex(self.df.index).ffill()
                 
                 # Add log return of external source (not raw price level)
                 self.df[f'{col_prefix}_return'] = np.log(
@@ -274,7 +254,7 @@ class DataCleaner:
             if os.path.exists(fg_path):
                 fg_df = pd.read_csv(fg_path, parse_dates=['timestamp'])
                 fg_df = fg_df.set_index('timestamp')
-                fg_df = fg_df.reindex(self.df.index).ffill().bfill()
+                fg_df = fg_df.reindex(self.df.index).ffill()
                 
                 self.df['fear_greed'] = fg_df['fear_greed']
                 self.df['fear_greed'] = self.df['fear_greed'].fillna(50)  # neutral default
