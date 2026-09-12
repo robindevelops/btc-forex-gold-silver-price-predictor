@@ -1,0 +1,125 @@
+{
+  "Bitcoin": {
+    "Ridge": {
+      "alpha": 100.0
+    },
+    "RandomForest": {
+      "n_estimators": 300,
+      "max_depth": 3,
+      "min_samples_leaf": 30
+    },
+    "LightGBM": {
+      "n_estimators": 400,
+      "learning_rate": 0.01,
+      "num_leaves": 4,
+      "min_child_samples": 50,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 5.0
+    },
+    "CatBoost": {
+      "iterations": 500,
+      "learning_rate": 0.01,
+      "depth": 3,
+      "l2_leaf_reg": 3.0
+    },
+    "GRU": {
+      "units": 32,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "epochs": 60,
+      "patience": 8
+    },
+    "LSTM": {
+      "units": 32,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "epochs": 60,
+      "patience": 8
+    }
+  },
+  "Gold": {
+    "Ridge": {
+      "alpha": 100.0
+    },
+    "RandomForest": {
+      "n_estimators": 300,
+      "max_depth": 3,
+      "min_samples_leaf": 10
+    },
+    "LightGBM": {
+      "n_estimators": 400,
+      "learning_rate": 0.03,
+      "num_leaves": 4,
+      "min_child_samples": 20,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 0.0
+    },
+    "CatBoost": {
+      "iterations": 500,
+      "learning_rate": 0.01,
+      "depth": 5,
+      "l2_leaf_reg": 3.0
+    },
+    "GRU": {
+      "units": 32,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "epochs": 60,
+      "patience": 8
+    },
+    "LSTM": {
+      "units": 16,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "epochs": 60,
+      "patience": 8
+    }
+  },
+  "Silver": {
+    "Ridge": {
+      "alpha": 100.0
+    },
+    "RandomForest": {
+      "n_estimators": 300,
+      "max_depth": 3,
+      "min_samples_leaf": 10
+    },
+    "LightGBM": {
+      "n_estimators": 400,
+      "learning_rate": 0.01,
+      "num_leaves": 4,
+      "min_child_samples": 50,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 0.0
+    },
+    "CatBoost": {
+      "iterations": 500,
+      "learning_rate": 0.01,
+      "depth": 3,
+      "l2_leaf_reg": 10.0
+    },
+    "GRU": {
+      "units": 32,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "epochs": 60,
+      "patience": 8
+    },
+    "LSTM": {
+      "units": 16,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "epochs": 60,
+      "patience": 8
+    }
+  }
+}

@@ -1,150 +1,91 @@
-<div align="center">
-  <h1>📈 AI-Powered Multi-Asset Price Predictor</h1>
-  <p><i>An end-to-end ML price prediction system for Bitcoin, Gold and Silver using LSTM, GRU, LightGBM, CatBoost, and Stacked Ensemble models.</i></p>
-  <p>
-    <img src="https://img.shields.io/badge/Python-3.11-blue" alt="Python">
-    <img src="https://img.shields.io/badge/TensorFlow-2.16-orange" alt="TensorFlow">
-    <img src="https://img.shields.io/badge/Streamlit-1.50-red" alt="Streamlit">
-    <img src="https://img.shields.io/badge/FastAPI-0.100-green" alt="FastAPI">
-  </p>
-</div>
+# Multi-Asset Next-Day Return Prediction — Bitcoin, Gold, Silver
 
-<hr>
+*Final Year Project (BSCS) — a leakage-audited, walk-forward-validated comparison of statistical, tree-based and recurrent models against the random-walk baseline, with a live prediction dashboard and API.*
 
-<h2>🎯 Project Overview</h2>
-<p>
-  Predicting financial markets is notoriously difficult due to noise and volatility. This system implements a <b>complete machine learning pipeline</b> — from data collection and feature engineering to multi-model forecasting and interactive dashboard visualization. It is designed as a decision-support tool to help users analyze historical price trends and view AI-generated price forecasts.
-</p>
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16-orange) ![LightGBM](https://img.shields.io/badge/LightGBM-4.6-green) ![Streamlit](https://img.shields.io/badge/Streamlit-1.50-red) ![Tests](https://img.shields.io/badge/tests-25%20passing-brightgreen)
 
-<hr>
+## What the project does
 
-<h2>🚀 Key Features</h2>
+1. Downloads daily OHLCV for **BTC-USD**, **GC=F** (gold futures) and **SI=F** (silver futures) plus macro series (DXY, WTI, 10-y yield, S&P 500, VIX) and the crypto Fear & Greed index.
+2. Engineers **stationary, backward-looking features** (returns, volatility, RSI/ADX/ROC, normalised MACD, EMA ratios, Bollinger %B/width, ATR/price, macro returns, sentiment) — `docs/FEATURES.md`.
+3. Predicts the **next-day log return** `y = ln(P_{t+1}/P_t)` and converts it to a price.
+4. Compares **Naive (random walk), historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM and a stacked ensemble** under **expanding-window walk-forward validation**, tunes hyper-parameters on validation only, and evaluates the untouched test set **once** with return-space metrics, directional accuracy with significance, a Diebold–Mariano test against the random walk, and a strategy backtest.
+5. Serves the validation-selected model per asset in a **Streamlit dashboard** and a **FastAPI** endpoint, always alongside its held-out metrics, an uncertainty band and a disclaimer.
 
-<ul>
-  <li>
-    <b>Multi-Asset Support:</b> 
-    Unified prediction pipeline for Bitcoin (BTC-USD), Gold (GC=F) and Silver (SI=F) using Yahoo Finance data.
-  </li>
-  <li>
-    <b>Multi-Model Architecture:</b> 
-    <code>LSTM</code>, <code>GRU</code>, <code>LightGBM</code>, <code>CatBoost</code>, and <code>Stacked Ensemble</code> (Ridge meta-model) with walk-forward cross-validation.
-  </li>
-  <li>
-    <b>30+ Technical Indicators:</b> 
-    SMA, EMA, RSI, MACD, Bollinger Bands, ATR, VWAP, Stochastic Oscillator, Williams %R, ADX, CCI, ROC, lag returns, rolling volatility, calendar features.
-  </li>
-  <li>
-    <b>External Macro Data:</b> 
-    DXY (US Dollar Index), Crude Oil, S&P 500, VIX, Treasury Yields, and Bitcoin Fear & Greed Index.
-  </li>
-  <li>
-    <b>Baseline Comparisons:</b> 
-    Models evaluated against Naive, Linear Regression, Random Forest, XGBoost, ARIMA, and Gradient Boosting baselines.
-  </li>
-  <li>
-    <b>Interactive Dashboard:</b> 
-    Streamlit-based web UI with Plotly charts, technical indicator overlays, multi-model comparison, and AI prediction controls.
-  </li>
-  <li>
-    <b>REST API:</b> 
-    FastAPI endpoint for programmatic predictions (<code>GET /predict/{asset}</code>).
-  </li>
-  <li>
-    <b>Production Ready:</b> 
-    Docker support, CI/CD pipeline, automated retraining, centralized logging, and comprehensive test suite.
-  </li>
-</ul>
+The central research question is honest: *does any model beat the random walk at a one-day horizon, and by how much?* See `docs/RESULTS.md` for the answer with real numbers.
 
-<hr>
+## Results at a glance
 
-<h2>🏗️ Project Structure</h2>
+See **`docs/RESULTS.md`** (interpretation) and **`results/FINAL_RESULTS.md`** (auto-generated tables). Figures are in `results/figures/`.
 
-<pre>
-├── app/                  # Streamlit dashboard
+## Project structure
+
+```
+├── config.py                  paths, frozen split dates, target, feature policy, default hyper-parameters
+├── app/streamlit_app.py       dashboard (forecast + indicators · performance · methodology)
 ├── src/
-│   ├── api/              # FastAPI REST endpoint
-│   ├── data/             # Data collection, preprocessing, external data
-│   ├── models/           # LSTM, GRU, LightGBM, CatBoost, ensemble
-│   ├── training/         # Final training scripts (BTC, Gold, Silver)
-│   ├── evaluation/       # Backtesting, cross-validation, metrics
-│   ├── inference/        # Prediction pipeline
-│   └── utils/            # Logging, metrics, reproducibility, transforms
-├── tests/                # Unit and integration tests
-├── scripts/              # Automation (retrain.py)
-├── data/                 # Raw, processed data and model artifacts
-├── notebooks/            # Jupyter notebooks for exploration
-├── config.py             # Central configuration and hyperparameters
-├── Dockerfile            # Docker containerization
-├── docker-compose.yml    # Multi-service orchestration
-├── Makefile              # Task automation
-└── requirements.txt      # Pinned dependencies
-</pre>
+│   ├── data/
+│   │   ├── data_collection.py   Yahoo Finance OHLCV
+│   │   ├── external_data.py     macro + Fear & Greed
+│   │   ├── preprocessing.py     cleaning, features, chronological split, scaler, build_dataset()
+│   │   ├── eda.py               ADF tests, ACF/PACF, return distributions
+│   │   └── sync_live_data.py    live refresh for demos (never overwrites the frozen data)
+│   ├── models/
+│   │   ├── registry.py          uniform interface for all models (two-phase fitting)
+│   │   ├── model_gru.py / model_lstm.py
+│   │   └── ensemble_model.py    stacked ensemble (experiment)
+│   ├── training/
+│   │   ├── tune_models.py       walk-forward hyper-parameter search (train+val only)
+│   │   └── train_models.py      final training, train/val metrics, loss curves, feature importance
+│   ├── evaluation/
+│   │   ├── cross_validation.py  expanding-window folds
+│   │   ├── backtesting.py       ONE evaluation on the test set, model selection, results tables
+│   │   └── plots.py             report figures
+│   ├── inference/prediction.py  next-day prediction with context
+│   ├── api/app.py               FastAPI
+│   └── utils/                   metrics (DM test, directional accuracy, backtest), reconstruction, seeds, logging
+├── tests/                     25 tests: look-ahead, target alignment, split, reconstruction, metrics, inference
+├── results/                   cv_results.csv · final_test_results.csv · FINAL_RESULTS.md · tuning/ · figures/ · predictions/
+├── docs/                      METHODOLOGY · FEATURES · RESULTS · LIMITATIONS · VIVA_QA · REPORT_STRUCTURE · FIX_PLAN · AUDIT_SUMMARY
+├── notebooks/                 companion notebooks (load and display the script outputs)
+└── data/                      raw/ processed/ models/  (git-ignored except model_status.json)
+```
 
-<hr>
+## Quick start
 
-<h2>⚡ Quick Start</h2>
-
-<pre>
-# 1. Clone and install
-git clone &lt;repo-url&gt;
-cd crypto-forex-prediction-system
+```bash
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Collect data
-python src/data/data_collection.py
-python src/data/external_data.py
+make preprocess     # features + frozen chronological split + scaler (from data/raw)
+make eda            # stationarity tests, ACF/PACF, distributions
+make tune           # walk-forward hyper-parameter search  (~30 min; GRU/LSTM dominate)
+make train          # two-phase training of all models
+make stack          # stacked-ensemble experiment
+make evaluate       # the single test-set evaluation + model selection
+make figures        # report figures
+make test           # test suite
+make serve          # streamlit dashboard  →  http://localhost:8501
+make api            # uvicorn API          →  http://localhost:8000/docs
+```
 
-# 3. Preprocess features
-python src/data/preprocessing.py
+`make pipeline` runs everything from `preprocess` to `test`; `python scripts/retrain.py` additionally re-downloads data. `make collect-data` fetches from `config.DATA_START_DATE` (2018) — Yahoo Finance rate-limits aggressively, so the repository ships with the 2023-07 → 2026-07 data that all reported results use.
 
-# 4. Train models (optional — pre-trained models included)
-python src/training/train_final_btc.py
-python src/training/train_final_gold.py
-python src/training/train_final_silver.py
+## Methodology in one paragraph
 
-# 5. Launch dashboard
-streamlit run app/streamlit_app.py
+Chronological split by date (train ≤ 2025-09-10, validation ≤ 2026-02-17, test = rest), no shuffling; scaler fitted on train only; Gold/Silver keep their exchange calendar (no synthetic weekend rows); every feature at day *t* uses only data ≤ *t* (tested); the target is the next row's log return and never appears in the input window (tested); hyper-parameters and the served model are chosen by 4-fold expanding-window walk-forward validation inside train+val; the test set is read by exactly one script. Full detail: `docs/METHODOLOGY.md`.
 
-# 6. Or use the API
-uvicorn src.api.app:app --reload
-</pre>
+## API
 
-<h3>Using Make (Recommended)</h3>
-<pre>
-make install      # Install dependencies
-make collect-data # Fetch market data
-make preprocess   # Feature engineering
-make train        # Train all models
-make serve        # Launch Streamlit dashboard
-make test         # Run test suite
-make all          # Full pipeline
-</pre>
+```
+GET /health
+GET /models                       served model, selection rule, held-out metrics per asset
+GET /predict/{bitcoin|gold|silver}[?model=GRU]
+```
 
-<h3>Using Docker</h3>
-<pre>
-docker-compose up --build
-# Dashboard: http://localhost:8501
-# API: http://localhost:8000
-</pre>
+## Disclaimer
 
-<hr>
+Research prototype for an academic project. Next-day financial returns are close to unpredictable; the system reports its own held-out performance next to every forecast. Not financial advice.
 
-<h2>🧪 Testing</h2>
-<pre>
-python -m pytest tests/ -v
-</pre>
-
-<h2>📡 API Endpoints</h2>
-<pre>
-GET /health              # Health check
-GET /predict/{asset}     # Predict next day price (Bitcoin, Gold, Silver)
-GET /models              # List available models
-</pre>
-
-<hr>
-
-<div align="center">
-  <p>Built with ❤️ by <b>teamlocalhost</b></p>
-  <p><i>University of Lahore — BSCS Fall 2022 to 2026</i></p>
-</div>
+---
+<div align="center"><i>University of Lahore — BSCS — teamlocalhost</i></div>

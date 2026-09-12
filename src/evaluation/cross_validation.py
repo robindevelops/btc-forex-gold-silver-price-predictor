@@ -1,75 +1,85 @@
 """
-Time-Series Cross Validation Utilities.
+Expanding-window walk-forward validation.
 
-Implements Expanding Window CV (Walk-Forward Validation) to replace static train/test splits.
-Provides functions to generate out-of-fold predictions for stacking.
+The train+val period is cut into CV_FOLDS consecutive validation blocks; for fold k the
+model is trained on everything BEFORE the block and evaluated on the block. This mimics
+how the model would actually be used (always predicting the future from the past) and
+gives several independent out-of-sample estimates instead of one.
+
+    |---------- train ----------|-- val 1 --|
+    |---------------- train ----------------|-- val 2 --|
+    |------------------------ train --------------------|-- val 3 --|   ...
+
+The TEST split is never passed to anything in this module.
 """
-
 import numpy as np
 from sklearn.model_selection import TimeSeriesSplit
 
-def get_cv_splits(n_samples, n_splits=3, test_size=None):
-    """
-    Generate train and validation indices for expanding window cross-validation.
-    
-    Args:
-        n_samples (int): Total number of sequential samples.
-        n_splits (int): Number of CV folds.
-        test_size (int, optional): Fixed size for the validation set in each split.
-                                   If None, the validation set size will grow or be 
-                                   determined by TimeSeriesSplit defaults.
-                                   
-    Yields:
-        tuple: (train_indices, val_indices)
-    """
-    tscv = TimeSeriesSplit(n_splits=n_splits, test_size=test_size)
-    for train_index, val_index in tscv.split(np.arange(n_samples)):
-        yield train_index, val_index
+from config import CV_FOLDS
+from src.models.registry import make_model
+from src.data.preprocessing import unscale_target
+from src.utils.metrics import evaluate_forecast
 
-def generate_oof_predictions(model_builder_fn, model_train_fn, model_predict_fn, X, y, n_splits=3):
-    """
-    Generates out-of-fold (OOF) predictions using Walk-Forward Validation.
-    Useful for training a stacked ensemble meta-model on unbiased predictions.
-    
-    Args:
-        model_builder_fn: Function to build/instantiate a fresh model for each fold.
-        model_train_fn: Function to train the model, takes (model, X_train, y_train, X_val, y_val).
-        model_predict_fn: Function to predict with the trained model, takes (model, X_test).
-        X (np.ndarray): Input features (ordered by time).
-        y (np.ndarray): Target variable (ordered by time).
-        n_splits (int): Number of folds for TimeSeriesSplit.
-        
-    Returns:
-        tuple: (oof_predictions, oof_targets)
-            oof_predictions: Array of predictions for the validation periods.
-            oof_targets: The true target values corresponding to oof_predictions.
-    """
+
+def walk_forward_splits(n_samples, n_splits=CV_FOLDS, min_train=None):
+    """Yield (train_idx, val_idx) with growing training windows and equal validation blocks."""
     tscv = TimeSeriesSplit(n_splits=n_splits)
-    
-    oof_preds = []
-    oof_true = []
-    
-    for fold, (train_index, val_index) in enumerate(tscv.split(X)):
-        print(f"    Fold {fold+1}/{n_splits} - Train: {len(train_index)}, Val: {len(val_index)}")
-        
-        X_train, y_train = X[train_index], y[train_index]
-        X_val, y_val = X[val_index], y[val_index]
-        
-        # Instantiate fresh model
-        model = model_builder_fn()
-        
-        # Train model
-        model = model_train_fn(model, X_train, y_train, X_val, y_val)
-        
-        # Predict on validation set
-        preds = model_predict_fn(model, X_val)
-        
-        # We ensure preds are 1D
-        preds = np.array(preds).ravel()
-        
-        oof_preds.append(preds)
-        oof_true.append(y_val.ravel())
-        
-    # Concatenate all out-of-fold predictions and targets
-    # Note: The first chunk of training data is never used as validation in OOF
-    return np.concatenate(oof_preds), np.concatenate(oof_true)
+    for tr, va in tscv.split(np.arange(n_samples)):
+        if min_train and len(tr) < min_train:
+            continue
+        yield tr, va
+
+
+def _trainval_arrays(data):
+    """Concatenate train and val (chronological) — the only data CV is allowed to see."""
+    Xs = np.concatenate([data['X_train'], data['X_val']])
+    Xt = np.concatenate([data['Xt_train'], data['Xt_val']])
+    y = np.concatenate([data['y_train'], data['y_val']])
+    prev = np.concatenate([data['prev_train'], data['prev_val']])
+    return Xs, Xt, y, prev
+
+
+def cv_evaluate(model_name, params, data, n_splits=CV_FOLDS, inner_val_frac=0.15, return_oof=False):
+    """
+    Walk-forward evaluation of one (model, params) on train+val.
+    Inside each fold, the last `inner_val_frac` of the fold's training window is used as
+    the early-stopping monitor for models that need one; the fold's validation block is
+    only ever predicted, never fitted on.
+    Returns a list of per-fold metric dicts (and OOF arrays if requested).
+    """
+    Xs, Xt, y, prev = _trainval_arrays(data)
+    scaler, ti = data['scaler'], data['target_idx']
+    zero_scaled = float(-scaler.data_min_[ti] / (scaler.data_max_[ti] - scaler.data_min_[ti]))
+    folds, oof_pred, oof_idx = [], [], []
+
+    for k, (tr, va) in enumerate(walk_forward_splits(len(y), n_splits)):
+        n_inner = int(len(tr) * inner_val_frac)
+        tr_fit, tr_mon = tr[:-n_inner], tr[-n_inner:]
+
+        if model_name == 'ARIMA':
+            m = make_model('ARIMA').fit_series(np.ravel(y[tr]))
+            pred = m.forecast_walk_forward(np.ravel(y[va]))
+        elif model_name == 'Naive-Zero':
+            pred = np.full(len(va), zero_scaled)
+        else:
+            m = make_model(model_name, params)
+            m.fit(Xs[tr_fit], Xt[tr_fit], y[tr_fit], Xs[tr_mon], Xt[tr_mon], y[tr_mon], final=True)
+            pred = m.predict(Xs[va], Xt[va])
+
+        met = evaluate_forecast(unscale_target(y[va], scaler, ti), unscale_target(pred, scaler, ti), prev[va])
+        met.update({'fold': k + 1, 'n_train': len(tr), 'n_val': len(va)})
+        folds.append(met)
+        oof_pred.append(np.ravel(pred)); oof_idx.append(va)
+
+    if return_oof:
+        return folds, np.concatenate(oof_pred), np.concatenate(oof_idx)
+    return folds
+
+
+def summarise_folds(folds, keys=('RMSE_ret', 'MAE_ret', 'R2_ret', 'DirAcc_pct', 'RMSE_usd')):
+    out = {}
+    for k in keys:
+        vals = np.array([f[k] for f in folds], float)
+        out[f'{k}_mean'] = float(np.nanmean(vals))
+        out[f'{k}_std'] = float(np.nanstd(vals))
+    return out

@@ -1,29 +1,31 @@
 # Changelog
 
-All notable changes to the Crypto-Forex Prediction System will be documented in this file.
+## [FYP release] — 2026-09-12 — Audit → fix → validated pipeline
 
-## [Week 1] — Stop the Bleeding (Correctness Fixes)
+Full list with rationale in `docs/FIX_PLAN.md`; original findings in `docs/AUDIT_SUMMARY.md`.
 
-### Critical Fixes
-- **Fixed data leakage in 3 experiment scripts** — `experiment_dropout.py`, `experiment_seq_length.py`, and `experiment_lstm_units.py` all used `validation_data=(X_test, y_test)`, contaminating hyperparameter selection with held-out test data. Now use proper `(X_val, y_val)` for monitoring, test only for final evaluation. *Audit finding: Part 4, Training Pipeline.*
-- **Fixed default model path in `prediction.py`** — Changed from `btc_lstm_best.keras` (trained with leaky validation) to `btc_lstm_final.keras` (trained with correct 2-phase approach). *Audit finding: Part 4.*
-- **Disabled Silver LSTM** — Silver LSTM (R²=-0.849, 27.5% directional accuracy — below coin-flip) is now marked as disabled in `MODEL_STATUS` config. Falls back to Linear Regression. *Audit finding: Part 3, Model Architecture.*
+### Methodology (critical)
+- **Fixed price reconstruction** — `reconstruct_price` used the previous day's *open* (column 0) instead of the *close*; every USD metric and dashboard forecast was wrong by one intraday move. Now takes the explicit previous close; regression test asserts exact reconstruction of the true target.
+- **Removed synthetic weekend rows for Gold/Silver** — futures now keep their exchange calendar (30 % of rows were forward-filled zero-return fakes).
+- **Stationary features only** — price levels (open/high/low/close/volume/EMA/BB/ATR/MACD) are chart-only; models get ratios (`price/EMA−1`, `%B`, `ATR/price`, `MACD/price`, HL range) plus returns, volatility, RSI/ADX/ROC, macro returns, sentiment. Added `gold_return` for Silver.
+- **Walk-forward hyper-parameter tuning** (`src/training/tune_models.py`) on train+val only, replacing hyper-parameters that had been chosen on the test set in April.
+- **Two-phase training for every model with a stopping rule**; CatBoost no longer early-stops on its own training data.
+- **Honest evaluation** (`src/utils/metrics.py`, `src/evaluation/backtesting.py`): return-space RMSE/MAE/R², correct directional accuracy on non-flat days with binomial p-value, Diebold–Mariano test vs the random walk, strategy backtest vs buy-and-hold, train-vs-validation over-fitting gap. R² on price levels is no longer reported.
+- **Model selection by validation only**; `data/models/model_status.json` is written by the evaluation script, not hand-edited.
 
-### High-Priority Fixes
-- **Pinned all dependencies** — `requirements.txt` now uses exact versions instead of `>=` minimums. Added missing: `statsmodels`, `joblib`, `lightgbm`, `python-dotenv`. Safety snapshot saved in `requirements-lock.txt`.
-- **Added reproducibility seeds** — New `src/utils/reproducibility.py` provides `set_all_seeds(42)` covering Python, NumPy, TF, and PYTHONHASHSEED. Added to all experiment scripts.
-- **Fixed `seq_len` inconsistency** — Config specified `seq_len=30` but pipeline defaulted to 60. Now all paths use `BEST_LSTM_CONFIG['seq_len']` dynamically.
+### Models
+- Unified registry (`src/models/registry.py`): Naive-Zero, Naive-Mean, ARIMA, Ridge, RandomForest, LightGBM, CatBoost, GRU, LSTM; stacked ensemble rebuilt with non-negative weights as a reported experiment.
+- GRU/LSTM reduced to a single tunable layer (the old 2×100-unit stack over-fitted ~500 windows).
+- Removed `advanced_models.py`, `baseline_models.py`, `catboost_model.py`, `model_lgbm.py`, `arima_model.py`, the three near-duplicate `train_final_*.py` scripts.
 
-### Medium-Priority Fixes
-- **Fixed broken test import** — `test_preprocessing.py` imported from `src.preprocessing` instead of `src.data.preprocessing`.
-- **Removed hardcoded `n_features=16`** — All 5 occurrences across `evaluation.py`, `walk_forward.py`, `ensemble_model.py`, `train_final_btc.py`, and `streamlit_app.py` now use dynamic `scaler.n_features_in_`.
-- **Added deprecation warning to `training.py`** — Legacy script has known data leakage; users are directed to `train_final_btc.py`.
+### System
+- `src/inference/prediction.py`, `src/api/app.py`, `app/streamlit_app.py` rewritten around the served model; the previous versions crashed (LightGBM given 900 features, `float(dict)`) or silently failed (stale LSTM, missing Ensemble branch). The dashboard now shows horizon, model, held-out metrics, uncertainty band, disclaimer, a forecast-horizon chart and return-space validation plots.
+- Live sync writes `<prefix>_live_features.csv` and never overwrites the frozen evaluation data.
+- Data collection supports `DATA_START_DATE` (longer history).
+- Results moved to `results/` (as `config.RESULTS_DIR` always said); pre-fix results archived in `results/archive_pre_fix/` with an explanation.
+- Makefile, CI, `scripts/retrain.py` point at scripts that exist; new test suite (25 tests) covers look-ahead, target alignment, split integrity, reconstruction, metrics, model contract and inference sanity.
+- Documentation: `docs/METHODOLOGY.md`, `docs/FEATURES.md`, `docs/LIMITATIONS.md`, `docs/RESULTS.md`, `docs/VIVA_QA.md`, `docs/REPORT_STRUCTURE.md`, `docs/FIX_PLAN.md`, `docs/AUDIT_SUMMARY.md`; README corrected (no PatchTST/TFT/Williams %R/CCI claims).
 
-### Low-Priority Fixes
-- **Replaced empty `test_functions.py`** — Now contains real tests for RSI range, SMA correctness, Bollinger Band ordering, MACD structure, feature count, and no-lookahead verification.
-- **Removed unused `import requests`** from `data_collection.py`.
-
-### Infrastructure
-- **Fixed `.gitignore`** — Added `.env` file entry (was only ignoring `.env/` directory, leaving actual `.env` files exposed).
-- **Created `.env.example`** — Template for future FRED/NewsAPI keys.
-- **Created `requirements-lock.txt`** — Full `pip freeze` safety snapshot before changes.
+## [Week 1] — earlier correctness fixes (historical)
+- Experiment scripts used `validation_data=(X_test, y_test)` — fixed at the time, scripts later deleted.
+- Pinned dependencies, reproducibility seeds, `seq_len` consistency, `.gitignore` for `.env`.

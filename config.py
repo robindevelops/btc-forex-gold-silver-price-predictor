@@ -1,102 +1,111 @@
+"""
+Central configuration for the multi-asset price prediction system.
+
+Everything that an examiner may ask "where is this decided?" lives here:
+data sources, the frozen chronological split, the prediction target, the
+feature policy, default hyper-parameters and which model is served per asset.
+"""
 import os
+import json
 
-# Base directory
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Data directories
 RAW_DATA_DIR = os.path.join(BASE_DIR, 'data', 'raw')
 PROCESSED_DATA_DIR = os.path.join(BASE_DIR, 'data', 'processed')
 MODELS_DIR = os.path.join(BASE_DIR, 'data', 'models')
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
+FIGURES_DIR = os.path.join(RESULTS_DIR, 'figures')
+TUNING_DIR = os.path.join(RESULTS_DIR, 'tuning')
 
-# Data sources configuration
+for _d in (RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, RESULTS_DIR, FIGURES_DIR, TUNING_DIR):
+    os.makedirs(_d, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Data sources
+# ---------------------------------------------------------------------------
 ASSET_CONFIG = {
-    'Bitcoin': {
-        'ticker': 'BTC-USD',
-        'type': 'crypto',
-        'source': 'yfinance',
-        'filename': 'bitcoin_data.csv'
-    },
-    'Gold': {
-        'ticker': 'GC=F',
-        'type': 'commodity',
-        'source': 'yfinance',
-        'filename': 'gold_data.csv'
-    },
-    'Silver': {
-        'ticker': 'SI=F',
-        'type': 'commodity',
-        'source': 'yfinance',
-        'filename': 'silver_data.csv'
-    }
+    'Bitcoin': {'ticker': 'BTC-USD', 'type': 'crypto',    'source': 'yfinance', 'filename': 'bitcoin_data.csv', 'prefix': 'btc'},
+    'Gold':    {'ticker': 'GC=F',    'type': 'commodity', 'source': 'yfinance', 'filename': 'gold_data.csv',    'prefix': 'gold'},
+    'Silver':  {'ticker': 'SI=F',    'type': 'commodity', 'source': 'yfinance', 'filename': 'silver_data.csv',  'prefix': 'silver'},
+}
+ASSETS = list(ASSET_CONFIG.keys())
+
+def get_prefix(asset_name):
+    return ASSET_CONFIG[asset_name]['prefix']
+
+# History to download. Yahoo Finance supports much longer histories; more data is
+# the single most effective improvement available (see docs/LIMITATIONS.md).
+DATA_START_DATE = '2018-01-01'
+
+# ---------------------------------------------------------------------------
+# Prediction task
+# ---------------------------------------------------------------------------
+# Target: next-day log return  y_t = ln(P_{t+1} / P_t)
+# Horizon: 1 trading day (Bitcoin trades every calendar day; Gold/Silver on exchange days)
+TARGET_COL = 'log_return'
+PREDICTION_HORIZON_DAYS = 1
+
+# ---------------------------------------------------------------------------
+# Frozen chronological split (identical for all assets, by calendar date)
+#   train : <= TRAIN_END
+#   val   : TRAIN_END < t <= VAL_END        (hyper-parameter / epoch selection, walk-forward folds)
+#   test  : > VAL_END                       (touched ONCE, by src/evaluation/backtesting.py)
+# ---------------------------------------------------------------------------
+TRAIN_END = '2025-09-10'
+VAL_END = '2026-02-17'
+
+# ---------------------------------------------------------------------------
+# Feature policy
+# ---------------------------------------------------------------------------
+# Raw / level columns are kept in *_features.csv for charting but are NEVER model inputs
+# (non-stationary: their test-set values fall outside the training range).
+LEVEL_COLUMNS = ['open', 'high', 'low', 'price', 'volume',
+                 'EMA_14', 'EMA_30', 'BB_Mid', 'BB_Upper', 'BB_Lower', 'ATR', 'MACD', 'MACD_Signal']
+
+# Sequence length for the recurrent models (lookback window in trading days)
+SEQ_LEN = 30
+
+# ---------------------------------------------------------------------------
+# Default hyper-parameters. These are *starting points*; the values actually used
+# for the final models come from walk-forward tuning (results/tuning/best_params.json)
+# produced by src/training/tune_models.py on train+val only.
+# ---------------------------------------------------------------------------
+DEFAULT_PARAMS = {
+    'LightGBM': {'n_estimators': 300, 'learning_rate': 0.02, 'num_leaves': 15,
+                 'min_child_samples': 30, 'subsample': 0.8, 'colsample_bytree': 0.8, 'reg_lambda': 1.0},
+    'CatBoost': {'iterations': 500, 'learning_rate': 0.03, 'depth': 4, 'l2_leaf_reg': 3.0},
+    'RandomForest': {'n_estimators': 300, 'max_depth': 6, 'min_samples_leaf': 20},
+    'Ridge': {'alpha': 10.0},
+    'GRU': {'units': 32, 'dropout': 0.2, 'learning_rate': 0.001, 'batch_size': 32, 'epochs': 80, 'patience': 10},
+    'LSTM': {'units': 32, 'dropout': 0.2, 'learning_rate': 0.001, 'batch_size': 32, 'epochs': 80, 'patience': 10},
 }
 
-# Settings mapping
-DEFAULT_HISTORY_DAYS = 365 * 3 # 3 years for decent training data
+BEST_PARAMS_PATH = os.path.join(TUNING_DIR, 'best_params.json')
 
-# Best Hyperparameters (found via Week 5/6 experiments)
-BEST_LSTM_CONFIG = {
-    'seq_len': 30,
-    'lstm_units': 100,
-    'dense_units': 50,
-    'dropout_rate': 0.1,
-    'learning_rate': 0.001,
-    'batch_size': 16,
-    'patience': 20,
-    'epochs': 150
-}
+def get_params(model_name, asset_name=None):
+    """Tuned params for (model, asset) if tuning has been run, else defaults."""
+    params = dict(DEFAULT_PARAMS[model_name])
+    if asset_name and os.path.exists(BEST_PARAMS_PATH):
+        with open(BEST_PARAMS_PATH) as f:
+            best = json.load(f)
+        params.update(best.get(asset_name, {}).get(model_name, {}))
+    return params
 
-BEST_LGBM_CONFIG = {
-    'n_estimators': 200,
-    'learning_rate': 0.05,
-    'max_depth': 6,
-    'num_leaves': 31,
-    'subsample': 0.8,
-    'colsample_bytree': 0.8
-}
+# Walk-forward (expanding window) validation folds inside train+val
+CV_FOLDS = 4
 
-BEST_GRU_CONFIG = {
-    'seq_len': 30,
-    'gru_units': 100,
-    'dense_units': 50,
-    'dropout_rate': 0.1,
-    'learning_rate': 0.001,
-    'batch_size': 16,
-    'patience': 20,
-    'epochs': 150
-}
+# ---------------------------------------------------------------------------
+# Which model is served per asset. Written by src/evaluation/backtesting.py based on
+# walk-forward validation (NOT test) results; hand-editing is discouraged.
+# ---------------------------------------------------------------------------
+MODEL_STATUS_PATH = os.path.join(MODELS_DIR, 'model_status.json')
 
-BEST_CATBOOST_CONFIG = {
-    'iterations': 500,
-    'learning_rate': 0.03,
-    'depth': 6,
-    'eval_metric': 'RMSE',
-    'random_seed': 42
-}
+def load_model_status():
+    if os.path.exists(MODEL_STATUS_PATH):
+        with open(MODEL_STATUS_PATH) as f:
+            return json.load(f)
+    return {a: {'primary_model': 'LightGBM', 'status': 'untrained'} for a in ASSETS}
 
-# Cross-Validation Configuration (Week 6)
-CV_FOLDS = 3  # 3 folds to balance robust evaluation with deep learning training times
-
-# Model status per asset — controls which model is served for predictions.
-# Week 6 Update: Stacked Ensemble (meta-model) is primary for BTC/Gold, GRU for Silver.
-MODEL_STATUS = {
-    'Bitcoin': {
-        'primary_model': 'stacked_ensemble',
-        'model_file': 'btc_meta_model.pkl',
-        'base_models': ['btc_gru_final.keras', 'btc_lgbm_final.pkl'],
-        'status': 'active',
-    },
-    'Gold': {
-        'primary_model': 'stacked_ensemble',
-        'model_file': 'gold_meta_model.pkl',
-        'base_models': ['gold_gru_final.keras', 'gold_lgbm_final.pkl', 'gold_catboost_final.cbm'],
-        'status': 'active',
-    },
-    'Silver': {
-        'primary_model': 'stacked_ensemble',
-        'model_file': 'silver_meta_model.pkl',
-        'base_models': ['silver_gru_final.keras', 'silver_lgbm_final.pkl', 'silver_catboost_final.cbm'],
-        'status': 'active',
-    },
-}
-
+MODEL_STATUS = load_model_status()

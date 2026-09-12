@@ -9,7 +9,7 @@ tensorflow==2.16.2
 
 # Tree-Based Models
 lightgbm==4.6.0
-xgboost>=1.7.0
+scipy>=1.10.0
 
 # Time Series
 statsmodels==0.14.6

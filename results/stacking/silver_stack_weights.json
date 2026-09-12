@@ -1,0 +1,15 @@
+{
+  "bases": [
+    "Ridge",
+    "LightGBM",
+    "CatBoost",
+    "GRU"
+  ],
+  "weights": {
+    "Ridge": 0.061709548505987526,
+    "LightGBM": 0.03704688116037363,
+    "CatBoost": 0.03762871259235967,
+    "GRU": 0.0
+  },
+  "intercept": 0.5219355256717026
+}

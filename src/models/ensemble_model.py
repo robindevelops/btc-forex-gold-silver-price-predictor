@@ -1,134 +1,83 @@
 """
-Advanced Stacked Ensemble Meta-Model (PyTorch/LightGBM/CatBoost/GRU).
+Stacked ensemble (experiment).
 
-Trains Ridge Regression Meta-Models for each asset using the Out-Of-Fold predictions 
-of the optimal base models, leveraging Walk-Forward Cross Validation.
+Base models' out-of-fold predictions from the walk-forward folds (train+val only) are
+used to fit a non-negative Ridge meta-model:
+
+    r̂_stack = w_0 + Σ_k w_k · r̂_k        w_k ≥ 0
+
+Non-negativity keeps the weights interpretable ("how much does the stack trust
+model k?"). If the base models carry no out-of-sample signal, the weights shrink to
+~0 and the stack degenerates to the intercept — that is a *result*, and the audit of
+the original project found exactly this. The stack is therefore reported as an
+experiment in the comparison table, not assumed to be the best model.
+
+    python src/models/ensemble_model.py --assets Gold --bases Ridge LightGBM GRU
 """
-
 import os
 import sys
+import json
+import argparse
 import numpy as np
-import pandas as pd
 import joblib
-import matplotlib.pyplot as plt
-from datetime import datetime
-from sklearn.model_selection import TimeSeriesSplit
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from config import ASSETS, MODELS_DIR, RESULTS_DIR, get_params, get_prefix, CV_FOLDS
+from src.data.preprocessing import build_dataset
+from src.evaluation.cross_validation import cv_evaluate
+from src.models.registry import load_trained
+from src.utils.logging_config import get_logger, setup_logging
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-from config import MODELS_DIR, PROCESSED_DATA_DIR, BEST_LSTM_CONFIG, BEST_GRU_CONFIG, BEST_LGBM_CONFIG
-from src.data.preprocessing import create_sequences
-from src.utils.inverse_transform import reconstruct_price
-from src.models.model_lgbm import build_lgbm_model
-from src.models.model_gru import build_gru_model
-
-# We use the previous keras callbacks for GRU
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RESULTS_DIR = os.path.join(BASE_DIR, 'results')
+setup_logging()
+log = get_logger(__name__)
+DEFAULT_BASES = ['Ridge', 'LightGBM', 'CatBoost', 'GRU']
 
 
-def evaluate_asset_ensemble(asset_name, seq_len=30, n_splits=3):
-    print(f"\n{'='*70}")
-    print(f"  {asset_name.upper()} — Stacked Ensemble via Walk-Forward CV")
-    print(f"{'='*70}")
-    
-    prefix = 'btc' if asset_name == 'Bitcoin' else asset_name.lower()
-    
-    # 1. Load the continuous full dataset
-    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'), index_col='timestamp', parse_dates=True)
-    val_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_val_scaled.csv'), index_col='timestamp', parse_dates=True)
-    test_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_test_scaled.csv'), index_col='timestamp', parse_dates=True)
-    
-    scaler = joblib.load(os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl'))
-    target_idx = list(train_df.columns).index('log_return') if 'log_return' in train_df.columns else list(train_df.columns).index('price')
-
-    # We evaluate the models on the validation set using walk-forward CV
-    cv_df = pd.concat([train_df, val_df])
-    
-    # Generate continuous sequences for traditional models
-    X_cv, y_cv = create_sequences(cv_df, seq_len=seq_len)
-    
-    # Prepare OOF prediction arrays
-    oof_preds = []
-    model_names = []
-    
-    if asset_name == 'Bitcoin':
-        model_names = ['GRU', 'LightGBM']
-    elif asset_name == 'Gold':
-        model_names = ['GRU', 'CatBoost']
-    elif asset_name == 'Silver':
-        model_names = ['LightGBM', 'CatBoost', 'GRU']
-
-    for name in model_names:
-        oof_preds.append(np.zeros(len(y_cv)))
-
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-    
-    print(f"  Generating Out-Of-Fold (OOF) predictions ({n_splits} folds)...")
-    
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X_cv)):
-        X_train_fold, X_val_fold = X_cv[train_idx], X_cv[val_idx]
-        y_train_fold, y_val_fold = y_cv[train_idx], y_cv[val_idx]
-        
-        # DataFrame equivalents for NeuralForecast (Requires tricky index mapping, so for simplicity in this script
-        # we will use the base LightGBM/CatBoost/GRU models for the ensemble if NeuralForecast is too complex for OOF.
-        # Actually, since we only need the meta-model weights, let's just use the robust tabular models for OOF estimation
-        # and assign NeuralForecast a default weight, OR just fully use LightGBM/CatBoost/GRU for silver.
-        
-        # To avoid index hell with DataFrames vs Numpy arrays in a single script, we'll train the tree/rnn models for OOF:
-        for i, m_name in enumerate(model_names):
-            if m_name == 'LightGBM':
-                lgbm = build_lgbm_model(**BEST_LGBM_CONFIG)
-                lgbm.fit(X_train_fold[:, -1, :], y_train_fold.ravel())
-                preds = lgbm.predict(X_val_fold[:, -1, :]).reshape(-1,1)
-                oof_preds[i][val_idx] = preds.ravel()
-                
-            elif m_name == 'CatBoost':
-                from catboost import CatBoostRegressor
-                cb = CatBoostRegressor(iterations=100, learning_rate=0.05, depth=6, verbose=0)
-                cb.fit(X_train_fold[:, -1, :], y_train_fold.ravel())
-                preds = cb.predict(X_val_fold[:, -1, :]).reshape(-1,1)
-                oof_preds[i][val_idx] = preds.ravel()
-                
-            elif m_name == 'GRU':
-                gru_cfg = {k: v for k, v in BEST_GRU_CONFIG.items() if k not in ['seq_len', 'batch_size', 'epochs', 'patience']}
-                gru = build_gru_model(seq_len=seq_len, n_features=X_train_fold.shape[2], **gru_cfg)
-                gru.fit(X_train_fold, y_train_fold, epochs=5, batch_size=16, verbose=0)
-                preds = gru.predict(X_val_fold, verbose=0)
-                oof_preds[i][val_idx] = preds.ravel()
-
-    # Meta-Model Training on OOF
-    # We only train the meta model on the indices that were actually validated (excluding the first train set)
-    valid_indices = []
-    for train_idx, val_idx in tscv.split(X_cv):
-        valid_indices.extend(val_idx)
-    valid_indices = np.array(valid_indices)
-    
-    X_meta = np.column_stack([oof[valid_indices] for oof in oof_preds])
-    y_meta = y_cv[valid_indices]
-    
-    meta_model = Ridge(alpha=1.0)
-    meta_model.fit(X_meta, y_meta)
-    
-    print("\n  Training Meta-Model (Ridge Regression) on OOF predictions...")
-    weights_str = ", ".join([f"{name}: {w*100:.1f}%" for name, w in zip(model_names, meta_model.coef_[0] if len(meta_model.coef_.shape)>1 else meta_model.coef_)])
-    print(f"    Learned Weights — {weights_str}")
-    
-    # Save meta-model
-    meta_path = os.path.join(MODELS_DIR, f"{prefix}_metamodel.pkl")
-    joblib.dump(meta_model, meta_path)
-    
-    print("\n  ✅ Meta-Model successfully trained and saved!")
-    return meta_model
+def stack_path(asset):
+    return os.path.join(MODELS_DIR, f'{get_prefix(asset)}_stack.pkl')
 
 
-if __name__ == "__main__":
-    evaluate_asset_ensemble("Bitcoin")
-    evaluate_asset_ensemble("Gold")
-    evaluate_asset_ensemble("Silver")
-    print("\n  Final Evaluation and Retraining of all models is complete.")
+def fit_stack(asset, bases, data=None):
+    data = data or build_dataset(asset)
+    oof_cols, idx_ref = [], None
+    for b in bases:
+        _, oof, idx = cv_evaluate(b, get_params(b, asset), data, n_splits=CV_FOLDS, return_oof=True)
+        oof_cols.append(oof)
+        idx_ref = idx
+    y = np.concatenate([data['y_train'], data['y_val']])[idx_ref].ravel()
+    X_meta = np.column_stack(oof_cols)
+    meta = Ridge(alpha=1.0, positive=True).fit(X_meta, y)
+    weights = dict(zip(bases, [float(w) for w in meta.coef_]))
+    log.info(f"{asset}: stack weights {weights}  intercept={float(meta.intercept_):.4f}")
+    joblib.dump({'meta': meta, 'bases': bases, 'weights': weights}, stack_path(asset))
+    os.makedirs(os.path.join(RESULTS_DIR, 'stacking'), exist_ok=True)
+    with open(os.path.join(RESULTS_DIR, 'stacking', f'{asset.lower()}_stack_weights.json'), 'w') as f:
+        json.dump({'bases': bases, 'weights': weights, 'intercept': float(meta.intercept_)}, f, indent=2)
+    return meta, weights
+
+
+class StackedModel:
+    """Inference wrapper: loads the meta-model and the deployed base models."""
+    name = 'Stacked'
+
+    def __init__(self, asset):
+        obj = joblib.load(stack_path(asset))
+        self.meta, self.bases, self.weights = obj['meta'], obj['bases'], obj['weights']
+        self.base_models = [load_trained(b, asset) for b in self.bases]
+        self.fit_info = {'weights': self.weights}
+
+    def predict(self, Xseq, Xt):
+        cols = [np.ravel(m.predict(Xseq, Xt)) for m in self.base_models]
+        return self.meta.predict(np.column_stack(cols))
+
+
+if __name__ == '__main__':
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--assets', nargs='+', default=ASSETS)
+    ap.add_argument('--bases', nargs='+', default=DEFAULT_BASES)
+    args = ap.parse_args()
+    for a in args.assets:
+        fit_stack(a, args.bases)

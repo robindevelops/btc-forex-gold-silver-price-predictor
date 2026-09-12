@@ -1,31 +1,48 @@
-.PHONY: install test lint collect-data preprocess train predict serve docker-build docker-run clean all
+.PHONY: install test collect-data preprocess eda tune train stack evaluate figures pipeline serve api docker-build docker-run clean
+
+PY ?= python
 
 install:
 	pip install -r requirements.txt
 
 test:
-	python -m pytest tests/ -v
+	$(PY) -m pytest tests/ -q
 
-lint:
-	flake8 src/ tests/ || echo "Linting finished"
+collect-data:            ## download OHLCV + macro + sentiment (needs network; Yahoo may rate-limit)
+	$(PY) src/data/data_collection.py
+	$(PY) src/data/external_data.py
 
-collect-data:
-	python src/data/data_collection.py
-	python src/data/external_data.py
+preprocess:              ## clean, engineer features, frozen chronological split, fit scaler on train
+	$(PY) src/data/preprocessing.py
 
-preprocess:
-	python src/data/preprocessing.py
+eda:                     ## ADF tests, ACF/PACF, return distributions
+	$(PY) src/data/eda.py
 
-train:
-	python src/training/train_lgbm.py
-	python src/training/train_catboost.py
-	python src/training/train_deep_learning.py
+tune:                    ## walk-forward hyper-parameter search on train+val only (~30 min, GRU/LSTM dominate)
+	$(PY) src/training/tune_models.py
+
+train:                   ## two-phase training of every model with the tuned parameters
+	$(PY) src/training/train_models.py
+
+stack:                   ## stacked-ensemble experiment (OOF meta-model)
+	$(PY) src/models/ensemble_model.py
+
+evaluate:                ## ONE evaluation on the untouched test set + model selection by CV
+	$(PY) src/evaluation/backtesting.py
+
+figures:                 ## report figures into results/figures/
+	$(PY) src/evaluation/plots.py
+
+pipeline: preprocess eda tune train stack evaluate figures test   ## full reproducible run from raw data
 
 predict:
-	python src/inference/prediction.py
+	$(PY) src/inference/prediction.py
 
 serve:
 	streamlit run app/streamlit_app.py
+
+api:
+	uvicorn src.api.app:app --reload
 
 docker-build:
 	docker build -t crypto-forex-predictor .
@@ -36,8 +53,4 @@ docker-run:
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
-	rm -rf .pytest_cache/
-	rm -rf .coverage
-	rm -rf htmlcov/
-
-all: collect-data preprocess train test
+	rm -rf .pytest_cache/ catboost_info/

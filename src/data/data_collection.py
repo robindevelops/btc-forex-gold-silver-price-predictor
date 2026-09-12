@@ -1,83 +1,59 @@
+"""
+Download daily OHLCV for Bitcoin (BTC-USD), Gold (GC=F) and Silver (SI=F) from Yahoo Finance.
+
+    python src/data/data_collection.py                  # from config.DATA_START_DATE
+    python src/data/data_collection.py --start 2015-01-01
+
+Output: data/raw/<asset>_data.csv with columns timestamp, open, high, low, price (close), volume.
+Gold/Silver are front-month futures: they trade on exchange days only (no weekend rows are
+created — see preprocessing) and the yfinance volume column is contract-specific and noisy.
+"""
+import os
+import argparse
 import pandas as pd
 import yfinance as yf
-import os
-from config import RAW_DATA_DIR, ASSET_CONFIG, DEFAULT_HISTORY_DAYS
 
-def fetch_bitcoin_data(days=DEFAULT_HISTORY_DAYS):
-    """
-    Fetches historical Bitcoin data using yFinance (defaults to 3 years),
-    bypassing the free CoinGecko 365-day API limitation.
-    """
-    return fetch_forex_data('Bitcoin')
+from config import RAW_DATA_DIR, ASSET_CONFIG, DATA_START_DATE
 
-def fetch_gold_data():
-    """Fetches historical Gold data using yFinance."""
-    return fetch_forex_data('Gold')
 
-def fetch_silver_data():
-    """Fetches historical Silver data using yFinance."""
-    return fetch_forex_data('Silver')
-
-def fetch_forex_data(asset_name):
-    """
-    Fetches historical forex/commodity data using yFinance.
-    Standardizes output to ['timestamp', 'price'].
-    """
-    print(f"\nFetching data for {asset_name}...")
-    config = ASSET_CONFIG.get(asset_name)
-    if not config or config['source'] != 'yfinance':
-        raise ValueError(f"Invalid asset {asset_name} for yFinance")
-        
-    ticker_symbol = config['ticker']
-    filename = os.path.join(RAW_DATA_DIR, config['filename'])
-    
-    # Fetch data
+def fetch_asset(asset_name, start=DATA_START_DATE):
+    cfg = ASSET_CONFIG[asset_name]
+    print(f"\nFetching {asset_name} ({cfg['ticker']}) from {start}...")
     try:
-        ticker = yf.Ticker(ticker_symbol)
-        df = ticker.history(period="3y") # 3 years to match default or max
+        df = yf.Ticker(cfg['ticker']).history(start=start)
     except Exception as e:
         print(f"Network error fetching data for {asset_name}: {e}")
-        # Return empty DataFrame with expected columns on failure
-        return pd.DataFrame(columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-    
-    # Reset index to get Date as a column
-    df = df.reset_index()
-    
-    # Clean and standardize
-    df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+        return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'price', 'volume'])
+    if df.empty:
+        print(f"WARNING: empty response for {asset_name} (Yahoo rate limit?). Existing CSV left untouched.")
+        return df
+    df = df.reset_index()[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
     df.columns = ['timestamp', 'open', 'high', 'low', 'price', 'volume']
-    
-    # Ensure datetime format (removing timezone if present for CSV compatibility)
     df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
-    
-    # Save to CSV
-    df.to_csv(filename, index=False)
-    print(f"Data saved to {filename}")
-    
+    df = df.dropna(subset=['price'])
+    path = os.path.join(RAW_DATA_DIR, cfg['filename'])
+    df.to_csv(path, index=False)
+    print(f"  {len(df)} rows, {df['timestamp'].min().date()} → {df['timestamp'].max().date()} saved to {path}")
     return df
 
+
+# Backwards-compatible helpers
+fetch_bitcoin_data = lambda **k: fetch_asset('Bitcoin')
+fetch_gold_data = lambda: fetch_asset('Gold')
+fetch_silver_data = lambda: fetch_asset('Silver')
+fetch_forex_data = fetch_asset
+
+
 def verify_data(df, asset_name):
-    """Prints a brief check of the data as requested."""
-    print(f"\n--- Verification: {asset_name} ---")
-    print(f"Date Range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-    print(f"Price Range: ${df['price'].min():.2f} - ${df['price'].max():.2f}")
-    print(f"Average Volume: {df['volume'].mean():,.2f}")
-    print(f"Null Values:\n{df.isnull().sum()}")
-    print(f"Shape: {df.shape}")
+    if df.empty:
+        return
+    print(f"--- {asset_name}: {df['timestamp'].min().date()} → {df['timestamp'].max().date()}, "
+          f"price ${df['price'].min():.2f}–${df['price'].max():.2f}, nulls={int(df.isnull().sum().sum())}, shape={df.shape}")
+
 
 if __name__ == "__main__":
-    print("Starting data collection pipeline...")
-    
-    # 1. Bitcoin
-    df_btc = fetch_bitcoin_data(days=DEFAULT_HISTORY_DAYS)
-    verify_data(df_btc, "Bitcoin")
-    
-    # 2. Gold
-    df_gold = fetch_gold_data()
-    verify_data(df_gold, "Gold")
-    
-    # 3. Silver
-    df_silver = fetch_silver_data()
-    verify_data(df_silver, "Silver")
-    
-    print("\nWeek 1 Deliverable Check: 3 CSV files generated in data/raw/")
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--start', default=DATA_START_DATE)
+    args = ap.parse_args()
+    for asset in ASSET_CONFIG:
+        verify_data(fetch_asset(asset, args.start), asset)

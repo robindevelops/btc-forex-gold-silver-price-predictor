@@ -1,382 +1,183 @@
 """
-Comprehensive Backtesting & Final Metrics Table.
+FINAL EVALUATION on the untouched test set — run once, after tuning and training.
 
-Compares ALL models across ALL assets with:
-  - RMSE, MAE, MAPE, R²
-  - Directional Accuracy (% correct up/down calls)
-  - Naive Forecast baseline (tomorrow = today)
-  - Buy-and-Hold return comparison
+    python src/evaluation/backtesting.py
 
-Produces the final results table for the report.
+For every asset it
+  1. builds the walk-forward (validation) comparison table for baselines + all models
+     (`results/cv_results.csv`) — this is what model SELECTION is based on;
+  2. loads the deployed models and predicts the TEST period once
+     (`results/final_test_results.csv`, `results/predictions/<prefix>_test_predictions.csv`);
+  3. writes `data/models/model_status.json` — the model served per asset is the ML model with
+     the best mean walk-forward RMSE (return space). The test set never influences selection.
+  4. renders `results/FINAL_RESULTS.md` for the report.
+
+Metrics (see src/utils/metrics.py): RMSE/MAE/R² in return space, RMSE/MAE/MAPE in USD,
+directional accuracy on non-flat days with a binomial p-value, Diebold–Mariano test against
+the zero-return (random walk) forecast, and a long/flat strategy backtest with 10 bps costs.
 """
-
 import os
 import sys
+import json
 import numpy as np
 import pandas as pd
-import joblib
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import warnings
-warnings.filterwarnings('ignore')
 
-from statsmodels.tsa.arima.model import ARIMA
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from tensorflow.keras.models import load_model
-from src.utils.inverse_transform import reconstruct_price
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+from config import (ASSETS, RESULTS_DIR, MODELS_DIR, TUNING_DIR, MODEL_STATUS_PATH, PREDICTION_HORIZON_DAYS,
+                    TRAIN_END, VAL_END, get_params, get_prefix, CV_FOLDS)
+from src.data.preprocessing import build_dataset, unscale_target
+from src.models.registry import make_model, load_trained, TABULAR, RECURRENT
+from src.models.ensemble_model import StackedModel, stack_path
+from src.evaluation.cross_validation import cv_evaluate, summarise_folds
+from src.utils.metrics import evaluate_forecast
+from src.utils.logging_config import get_logger, setup_logging
 
-from config import PROCESSED_DATA_DIR, MODELS_DIR, BEST_LSTM_CONFIG
-from src.data.preprocessing import create_sequences
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RESULTS_DIR = os.path.join(BASE_DIR, 'results')
-os.makedirs(RESULTS_DIR, exist_ok=True)
+setup_logging()
+log = get_logger(__name__)
+ML_MODELS = list(TABULAR) + list(RECURRENT)
+BASELINE_MODELS = ['Naive-Zero', 'Naive-Mean', 'ARIMA']
+PRED_DIR = os.path.join(RESULTS_DIR, 'predictions')
+os.makedirs(PRED_DIR, exist_ok=True)
 
 
-# ═══════════════════════════════════════════════════════════
-#  UTILITIES
-# ═══════════════════════════════════════════════════════════
-
-def get_prefix(asset):
-    return 'btc' if asset == 'Bitcoin' else asset.lower()
-
-# Replaced by reconstruct_price from src.utils.inverse_transform
-
-def directional_accuracy(y_true, y_pred, y_prev):
-    """% of days where the model correctly predicted the direction (up/down)."""
-    actual_dir = np.sign(y_true - y_prev)
-    pred_dir = np.sign(y_pred - y_prev)
-    correct = np.sum(actual_dir == pred_dir)
-    return correct / len(y_true) * 100
-
-def compute_all_metrics(y_true, y_pred, y_prev=None):
-    """Compute RMSE, MAE, MAPE, R², and optionally Directional Accuracy."""
-    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-    mae = mean_absolute_error(y_true, y_pred)
-    mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
-    r2 = r2_score(y_true, y_pred)
-    
-    result = {'RMSE': rmse, 'MAE': mae, 'MAPE': mape, 'R2': r2}
-    
-    if y_prev is not None:
-        result['Dir_Acc'] = directional_accuracy(y_true, y_pred, y_prev)
-    else:
-        result['Dir_Acc'] = np.nan
-        
-    return result
+def model_exists(name, asset):
+    p = get_prefix(asset)
+    return os.path.exists(os.path.join(MODELS_DIR, f'{p}_{name.lower()}.pkl')) or \
+        os.path.exists(os.path.join(MODELS_DIR, f'{p}_{name.lower()}.keras')) or \
+        os.path.exists(os.path.join(MODELS_DIR, f'{p}_catboost.cbm')) and name == 'CatBoost'
 
 
-# ═══════════════════════════════════════════════════════════
-#  MODEL EVALUATORS
-# ═══════════════════════════════════════════════════════════
-
-def get_test_prices(asset):
-    """Load raw test prices and the preceding day for directional accuracy."""
-    prefix = get_prefix(asset)
-    df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_features.csv'),
-                     index_col='timestamp', parse_dates=True)
-    price = df['price']
-    n = len(price)
-    val_end = int(n * 0.85)
-    
-    test = price.iloc[val_end:].values
-    prev = price.iloc[val_end - 1:-1].values  # the day before each test day
-    dates = price.iloc[val_end:].index
-    return test, prev, dates
+# ------------------------------------------------------------------ validation table
+def cv_table(asset, data):
+    """Walk-forward scores for baselines (computed here) + tuned models (from tuning logs)."""
+    rows = []
+    for b in BASELINE_MODELS:
+        folds = cv_evaluate(b, {}, data, n_splits=CV_FOLDS)
+        rows.append({'asset': asset, 'model': b, 'n_folds': len(folds), **summarise_folds(folds)})
+    summary_path = os.path.join(TUNING_DIR, 'tuning_summary.csv')
+    if os.path.exists(summary_path):
+        ts = pd.read_csv(summary_path)
+        for _, r in ts[ts['asset'] == asset].iterrows():
+            rows.append({'asset': asset, 'model': r['model'], 'n_folds': CV_FOLDS,
+                         **{k: r[k] for k in ts.columns if k.endswith('_mean') or k.endswith('_std')}})
+    return rows
 
 
-def eval_naive(asset):
-    """Naive forecast: tomorrow's price = today's price."""
-    test, prev, _ = get_test_prices(asset)
-    # Naive prediction: use yesterday's actual price as today's forecast
-    y_pred = prev  # prev[i] is the day before test[i]
-    metrics = compute_all_metrics(test, y_pred, prev)
-    metrics['Model'] = 'Naive (t=t-1)'
-    metrics['Asset'] = asset
-    return metrics
+# ------------------------------------------------------------------ test predictions
+def test_predictions(asset, data):
+    scaler, ti = data['scaler'], data['target_idx']
+    Xs, Xt, y = data['X_test'], data['Xt_test'], data['y_test']
+    y_trval = np.concatenate([data['y_train'], data['y_val']])
+    preds = {}
+    zero_scaled = float(-scaler.data_min_[ti] / (scaler.data_max_[ti] - scaler.data_min_[ti]))
+    preds['Naive-Zero'] = np.full(len(y), zero_scaled)
+    preds['Naive-Mean'] = np.full(len(y), float(y_trval.mean()))
+    arima = make_model('ARIMA').fit_series(np.ravel(y_trval))
+    preds['ARIMA'] = arima.forecast_walk_forward(np.ravel(y))
+    log.info(f"{asset}: ARIMA order {arima.fit_info['order']}")
+    infos = {'ARIMA': arima.fit_info}
+    for name in ML_MODELS:
+        if not model_exists(name, asset):
+            log.warning(f"{asset}: no trained {name} found, skipping")
+            continue
+        m = load_trained(name, asset)
+        preds[name] = np.ravel(m.predict(Xs, Xt))
+        infos[name] = m.fit_info
+    if os.path.exists(stack_path(asset)):
+        st = StackedModel(asset)
+        preds['Stacked'] = np.ravel(st.predict(Xs, Xt))
+        infos['Stacked'] = st.fit_info
+    return preds, infos
 
 
-def eval_gru(asset):
-    """Load final GRU, walk-forward 1-step-ahead on test set."""
-    prefix = get_prefix(asset)
-    cfg = BEST_LSTM_CONFIG
-    seq_len = cfg['seq_len']
-    
-    model = load_model(os.path.join(MODELS_DIR, f'{prefix}_gru_final.keras'))
-    scaler = joblib.load(os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl'))
-    
-    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'),
-                           index_col='timestamp', parse_dates=True)
-    val_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_val_scaled.csv'),
-                         index_col='timestamp', parse_dates=True)
-    test_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_test_scaled.csv'),
-                          index_col='timestamp', parse_dates=True)
-    
-    full_df = pd.concat([train_df, val_df, test_df])
-    n_features = full_df.shape[1]
-    price_col_idx = list(full_df.columns).index('price')
-    values = full_df.values
-    test_start = len(train_df) + len(val_df)
-    total_test = len(test_df)
-    
-    preds_scaled = []
-    x_seqs = []
-    for i in range(total_test):
-        target_idx = test_start + i
-        x_seq = values[target_idx - seq_len:target_idx].reshape(1, seq_len, n_features)
-        x_seqs.append(x_seq)
-        preds_scaled.append(model.predict(x_seq, verbose=0)[0, 0])
-    
-    x_seqs_arr = np.concatenate(x_seqs, axis=0)
-    target_idx = list(full_df.columns).index('log_return') if 'log_return' in full_df.columns else price_col_idx
-    pred_usd = reconstruct_price(np.array(preds_scaled), x_seqs_arr, scaler, target_idx)
-    
-    test_actual, prev, _ = get_test_prices(asset)
-    metrics = compute_all_metrics(test_actual, pred_usd, prev)
-    metrics['Model'] = 'GRU (Optimized)'
-    metrics['Asset'] = asset
-    return metrics, pred_usd
+def main():
+    cv_rows, test_rows, status = [], [], {}
+    for asset in ASSETS:
+        log.info(f"===== {asset} =====")
+        data = build_dataset(asset)
+        scaler, ti = data['scaler'], data['target_idx']
+        true_ret = unscale_target(data['y_test'], scaler, ti)
+        prev = data['prev_test']
+
+        cv_rows += cv_table(asset, data)
+        preds, infos = test_predictions(asset, data)
+
+        pred_df = pd.DataFrame({'date': data['dates_test'], 'prev_close': prev,
+                                'actual_close': data['true_test'], 'actual_return': true_ret})
+        for name, p in preds.items():
+            r = unscale_target(p, scaler, ti)
+            met = evaluate_forecast(true_ret, r, prev)
+            test_rows.append({'asset': asset, 'model': name, 'n_test': len(true_ret), **met,
+                              'fit_info': json.dumps(infos.get(name, {}))})
+            pred_df[f'pred_return_{name}'] = r
+            pred_df[f'pred_close_{name}'] = prev * np.exp(r)
+            log.info(f"  {name:12s} RMSE_ret={met['RMSE_ret']:.5f} R2_ret={met['R2_ret']:+.3f} "
+                     f"DA={met['DirAcc_pct']:.1f}% (p={met['DirAcc_pvalue']:.2f}) DM p={met['DM_pvalue']:.2f} "
+                     f"RMSE$={met['RMSE_usd']:,.2f} strat={met['strategy_return_pct']:+.1f}% B&H={met['buy_hold_return_pct']:+.1f}%")
+        pred_df.to_csv(os.path.join(PRED_DIR, f'{get_prefix(asset)}_test_predictions.csv'), index=False)
+
+        # ---- model selection on VALIDATION (walk-forward) results only
+        cv_df = pd.DataFrame([r for r in cv_rows if r['asset'] == asset])
+        ml = cv_df[cv_df['model'].isin(ML_MODELS) & cv_df['model'].isin(preds.keys())]
+        best = ml.sort_values('RMSE_ret_mean').iloc[0]
+        naive_cv = cv_df[cv_df['model'] == 'Naive-Zero'].iloc[0]
+        test_best = [r for r in test_rows if r['asset'] == asset and r['model'] == best['model']][0]
+        test_naive = [r for r in test_rows if r['asset'] == asset and r['model'] == 'Naive-Zero'][0]
+        status[asset] = {
+            'primary_model': best['model'], 'status': 'active',
+            'selection_rule': 'lowest mean walk-forward RMSE (return space) on train+val folds',
+            'cv_rmse_ret': float(best['RMSE_ret_mean']), 'cv_rmse_ret_naive': float(naive_cv['RMSE_ret_mean']),
+            'cv_dir_acc': float(best['DirAcc_pct_mean']),
+            'test': {k: (None if (isinstance(v, float) and np.isnan(v)) else v) for k, v in test_best.items()
+                     if k not in ('asset', 'fit_info')},
+            'test_naive': {k: test_naive[k] for k in ('RMSE_ret', 'RMSE_usd', 'MAE_usd', 'MAPE_usd')},
+            'horizon_days': PREDICTION_HORIZON_DAYS, 'train_end': TRAIN_END, 'val_end': VAL_END,
+            'test_period': [str(data['dates_test'][0].date()), str(data['dates_test'][-1].date())],
+            'params': get_params(best['model'], asset), 'fit_info': infos.get(best['model'], {}),
+            'features': data['columns'],
+        }
+        log.info(f"  → served model for {asset}: {best['model']} (CV RMSE_ret {best['RMSE_ret_mean']:.5f} vs naive {naive_cv['RMSE_ret_mean']:.5f})")
+
+    pd.DataFrame(cv_rows).to_csv(os.path.join(RESULTS_DIR, 'cv_results.csv'), index=False)
+    pd.DataFrame(test_rows).to_csv(os.path.join(RESULTS_DIR, 'final_test_results.csv'), index=False)
+    with open(MODEL_STATUS_PATH, 'w') as f:
+        json.dump(status, f, indent=2, default=str)
+    write_markdown(pd.DataFrame(cv_rows), pd.DataFrame(test_rows), status)
+    log.info("Final evaluation complete → results/final_test_results.csv, results/cv_results.csv, results/FINAL_RESULTS.md")
 
 
-def eval_arima(asset):
-    """Fit ARIMA(1,1,0), walk-forward 1-step-ahead on test set."""
-    prefix = get_prefix(asset)
-    df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_features.csv'),
-                     index_col='timestamp', parse_dates=True)
-    price = df['price']
-    n = len(price)
-    val_end = int(n * 0.85)
-    
-    train_val = price.iloc[:val_end]
-    test = price.iloc[val_end:]
-    
-    model = ARIMA(train_val, order=(1, 1, 0))
-    fitted = model.fit()
-    
-    # 1-step ahead walk-forward forecast
-    forecast = []
-    for t in range(len(test)):
-        yhat = fitted.forecast(steps=1).iloc[0]
-        forecast.append(yhat)
-        fitted = fitted.append([test.iloc[t]], refit=False)
-        
-    forecast = np.array(forecast)
-    
-    test_actual, prev, _ = get_test_prices(asset)
-    metrics = compute_all_metrics(test_actual, forecast, prev)
-    metrics['Model'] = 'ARIMA(1,1,0)'
-    metrics['Asset'] = asset
-    return metrics, forecast
+def write_markdown(cv_df, test_df, status):
+    lines = ["# Final Results (auto-generated by src/evaluation/backtesting.py)", "",
+             f"Split: train ≤ {TRAIN_END}, validation ≤ {VAL_END}, test = remainder (touched once).", "",
+             "Model selection uses walk-forward validation only. **Bold** = served model. "
+             "DA = directional accuracy on non-flat days (p = one-sided binomial test vs 50%). "
+             "DM p = Diebold–Mariano test vs the zero-return random-walk forecast (squared error, return space).", ""]
+    for asset in ASSETS:
+        s = status[asset]
+        lines += [f"## {asset}", "",
+                  f"Test period {s['test_period'][0]} → {s['test_period'][1]} ({s['test']['n_test']} days). "
+                  f"Served model: **{s['primary_model']}** (selected by CV RMSE {s['cv_rmse_ret']:.5f} vs naive {s['cv_rmse_ret_naive']:.5f}).", "",
+                  "### Walk-forward validation (train+val, 4 expanding folds)", "",
+                  "| Model | RMSE (ret) | MAE (ret) | R² (ret) | Dir. Acc % | RMSE ($) |", "|---|---:|---:|---:|---:|---:|"]
+        for _, r in cv_df[cv_df['asset'] == asset].sort_values('RMSE_ret_mean').iterrows():
+            b = '**' if r['model'] == s['primary_model'] else ''
+            lines.append(f"| {b}{r['model']}{b} | {r['RMSE_ret_mean']:.5f} ± {r['RMSE_ret_std']:.5f} | {r['MAE_ret_mean']:.5f} | "
+                         f"{r['R2_ret_mean']:+.3f} | {r['DirAcc_pct_mean']:.1f} | {r['RMSE_usd_mean']:,.2f} |")
+        lines += ["", "### Untouched test set", "",
+                  "| Model | MAE ($) | RMSE ($) | MAPE % | RMSE (ret) | R² (ret) | Dir. Acc % (n, p) | DM p vs naive | Strategy % | Buy&Hold % |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+        for _, r in test_df[test_df['asset'] == asset].sort_values('RMSE_ret').iterrows():
+            b = '**' if r['model'] == s['primary_model'] else ''
+            da = '—' if r['model'] == 'Naive-Zero' else f"{r['DirAcc_pct']:.1f} ({int(r['DirAcc_n'])}, {r['DirAcc_pvalue']:.2f})"
+            dm = '—' if r['model'] == 'Naive-Zero' else f"{r['DM_pvalue']:.2f}"
+            lines.append(f"| {b}{r['model']}{b} | {r['MAE_usd']:,.2f} | {r['RMSE_usd']:,.2f} | {r['MAPE_usd']:.2f} | {r['RMSE_ret']:.5f} | "
+                         f"{r['R2_ret']:+.3f} | {da} | {dm} | {r['strategy_return_pct']:+.1f} | {r['buy_hold_return_pct']:+.1f} |")
+        lines.append("")
+    with open(os.path.join(RESULTS_DIR, 'FINAL_RESULTS.md'), 'w') as f:
+        f.write("\n".join(lines))
 
 
-def eval_baseline(asset, model_type):
-    """Train and evaluate sklearn baseline."""
-    prefix = get_prefix(asset)
-    scaler = joblib.load(os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl'))
-    
-    train_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_train_scaled.csv'), index_col='timestamp', parse_dates=True)
-    val_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_val_scaled.csv'), index_col='timestamp', parse_dates=True)
-    test_df = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_test_scaled.csv'), index_col='timestamp', parse_dates=True)
-    
-    full_df = pd.concat([train_df, val_df, test_df])
-    seq_len = BEST_LSTM_CONFIG['seq_len']
-    X, y = create_sequences(full_df, seq_len=seq_len)
-    
-    L_train = len(train_df)
-    L_val = len(val_df)
-    split_1 = L_train - seq_len
-    split_2 = L_train + L_val - seq_len
-    
-    X_train, y_train = X[:split_1], y[:split_1]
-    X_test, y_test = X[split_2:], y[split_2:]
-    
-    # Use 2D tabular features (last day of the sequence)
-    X_train_flat = X_train[:, -1, :]
-    X_test_flat = X_test[:, -1, :]
-    
-    if model_type == 'LinearRegression':
-        model = LinearRegression()
-        label = 'Linear Regression'
-    else:
-        model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-        label = 'Random Forest'
-    
-    model.fit(X_train_flat, y_train.ravel())
-    y_pred = model.predict(X_test_flat).reshape(-1, 1)
-    
-    target_idx = list(train_df.columns).index('log_return') if 'log_return' in train_df.columns else 0
-    
-    y_test_real = reconstruct_price(y_test, X_test, scaler, target_idx)
-    y_pred_real = reconstruct_price(y_pred, X_test, scaler, target_idx)
-    
-    # Correct alignment: test_actual exactly matches y_test_real
-    test_actual, prev, _ = get_test_prices(asset)
-    
-    metrics = compute_all_metrics(test_actual, y_pred_real, prev)
-    metrics['Model'] = label
-    metrics['Asset'] = asset
-    return metrics
-
-
-def eval_ensemble(asset, gru_pred, arima_pred):
-    """Weighted ensemble: 0.3*ARIMA + 0.7*GRU (aligned on matching length)."""
-    test_actual, prev, _ = get_test_prices(asset)
-    
-    min_len = min(len(gru_pred), len(arima_pred), len(test_actual))
-    a = test_actual[:min_len]
-    p = prev[:min_len]
-    ens = 0.3 * arima_pred[:min_len] + 0.7 * gru_pred[:min_len]
-    
-    metrics = compute_all_metrics(a, ens, p)
-    metrics['Model'] = 'Ensemble (0.3A+0.7G)'
-    metrics['Asset'] = asset
-    return metrics
-
-
-def eval_buy_and_hold(asset):
-    """Buy-and-hold return over the test period."""
-    test, _, dates = get_test_prices(asset)
-    bnh_return = (test[-1] - test[0]) / test[0] * 100
-    return bnh_return, test[0], test[-1]
-
-
-# ═══════════════════════════════════════════════════════════
-#  MAIN
-# ═══════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-    all_results = []
-    bnh_results = []
-    
-    for asset in ['Bitcoin', 'Gold', 'Silver']:
-        print(f"\n{'='*60}")
-        print(f"  Evaluating {asset}...")
-        print(f"{'='*60}")
-        
-        # Naive
-        print(f"  -> Naive forecast")
-        all_results.append(eval_naive(asset))
-        
-        # GRU
-        print(f"  -> GRU (walk-forward)")
-        gru_metrics, gru_pred = eval_gru(asset)
-        all_results.append(gru_metrics)
-        
-        # ARIMA
-        print(f"  -> ARIMA(1,1,0)")
-        arima_metrics, arima_pred = eval_arima(asset)
-        all_results.append(arima_metrics)
-        
-        # Ensemble
-        print(f"  -> Ensemble")
-        all_results.append(eval_ensemble(asset, gru_pred, arima_pred))
-        
-        # Baselines
-        print(f"  -> Linear Regression")
-        all_results.append(eval_baseline(asset, 'LinearRegression'))
-        
-        print(f"  -> Random Forest")
-        all_results.append(eval_baseline(asset, 'RandomForest'))
-        
-        # Buy-and-Hold
-        bnh_ret, start_p, end_p = eval_buy_and_hold(asset)
-        bnh_results.append({'Asset': asset, 'Start': start_p, 'End': end_p, 'Return': bnh_ret})
-    
-    # ═══════════════════════════════════════════════════════════
-    #  BUILD FINAL TABLE
-    # ═══════════════════════════════════════════════════════════
-    
-    df = pd.DataFrame(all_results)
-    
-    # Reorder columns
-    df = df[['Asset', 'Model', 'RMSE', 'MAE', 'MAPE', 'R2', 'Dir_Acc']]
-    
-    # Sort: by asset, then RMSE
-    df = df.sort_values(['Asset', 'RMSE'])
-    
-    print(f"\n\n{'='*100}")
-    print("  FINAL PERFORMANCE TABLE — ALL MODELS × ALL METRICS")
-    print(f"{'='*100}")
-    
-    for asset in ['Bitcoin', 'Gold', 'Silver']:
-        adf = df[df['Asset'] == asset].copy()
-        print(f"\n  ┌─── {asset.upper()} {'─'*80}")
-        
-        fmt = adf.copy()
-        fmt['RMSE'] = fmt['RMSE'].apply(lambda x: f"${x:,.2f}")
-        fmt['MAE'] = fmt['MAE'].apply(lambda x: f"${x:,.2f}")
-        fmt['MAPE'] = fmt['MAPE'].apply(lambda x: f"{x:.2f}%")
-        fmt['R2'] = fmt['R2'].apply(lambda x: f"{x:.4f}")
-        fmt['Dir_Acc'] = fmt['Dir_Acc'].apply(lambda x: f"{x:.1f}%" if not np.isnan(x) else "N/A")
-        
-        print(fmt[['Model', 'RMSE', 'MAE', 'MAPE', 'R2', 'Dir_Acc']].to_string(index=False))
-        
-        # Show buy-and-hold for context
-        bnh = [b for b in bnh_results if b['Asset'] == asset][0]
-        print(f"  └─── Buy & Hold: ${bnh['Start']:,.2f} → ${bnh['End']:,.2f} ({bnh['Return']:+.2f}%)")
-    
-    # ═══════════════════════════════════════════════════════════
-    #  DIRECTIONAL ACCURACY COMPARISON
-    # ═══════════════════════════════════════════════════════════
-    
-    print(f"\n\n{'='*80}")
-    print("  DIRECTIONAL ACCURACY (% Correct Up/Down Calls)")
-    print(f"{'='*80}")
-    
-    dir_df = df[df['Dir_Acc'].notna()][['Asset', 'Model', 'Dir_Acc']].copy()
-    
-    for asset in ['Bitcoin', 'Gold', 'Silver']:
-        adf = dir_df[dir_df['Asset'] == asset].sort_values('Dir_Acc', ascending=False)
-        print(f"\n  {asset}:")
-        for _, row in adf.iterrows():
-            bar = '█' * int(row['Dir_Acc'] / 2)
-            print(f"    {row['Model']:<25} {row['Dir_Acc']:5.1f}% {bar}")
-    
-    # ═══════════════════════════════════════════════════════════
-    #  SAVE
-    # ═══════════════════════════════════════════════════════════
-    
-    out_path = os.path.join(RESULTS_DIR, 'final_performance_table.csv')
-    df.to_csv(out_path, index=False)
-    print(f"\n\n  ✅ Saved final table to {out_path}")
-    
-    bnh_path = os.path.join(RESULTS_DIR, 'buy_and_hold.csv')
-    pd.DataFrame(bnh_results).to_csv(bnh_path, index=False)
-    print(f"  ✅ Saved buy-and-hold to {bnh_path}")
-    
-    # ═══════════════════════════════════════════════════════════
-    #  PLOT: Directional Accuracy bar chart
-    # ═══════════════════════════════════════════════════════════
-    
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
-    colors = {'GRU (Optimized)': '#2196F3', 'ARIMA(1,1,0)': '#FF9800',
-              'Ensemble (0.3A+0.7G)': '#E91E63', 'Naive (t=t-1)': '#9E9E9E',
-              'Linear Regression': '#4CAF50', 'Random Forest': '#795548'}
-    
-    for idx, asset in enumerate(['Bitcoin', 'Gold', 'Silver']):
-        adf = dir_df[dir_df['Asset'] == asset].sort_values('Dir_Acc', ascending=True)
-        bars = axes[idx].barh(adf['Model'], adf['Dir_Acc'],
-                              color=[colors.get(m, '#607D8B') for m in adf['Model']])
-        axes[idx].set_title(asset, fontsize=14, fontweight='bold')
-        axes[idx].set_xlim(0, 100)
-        axes[idx].axvline(x=50, color='red', linestyle='--', alpha=0.5, label='Random (50%)')
-        axes[idx].grid(True, alpha=0.2, axis='x')
-        
-        for bar, val in zip(bars, adf['Dir_Acc']):
-            axes[idx].text(bar.get_width() + 1, bar.get_y() + bar.get_height()/2,
-                          f'{val:.1f}%', va='center', fontsize=10)
-    
-    axes[0].set_xlabel('Directional Accuracy (%)')
-    plt.suptitle('Directional Accuracy — % Correct Up/Down Predictions', fontsize=16, fontweight='bold')
-    plt.tight_layout()
-    
-    dir_plot = os.path.join(RESULTS_DIR, 'directional_accuracy.png')
-    plt.savefig(dir_plot, dpi=150)
-    plt.close()
-    print(f"  ✅ Saved directional accuracy plot to {dir_plot}")
+if __name__ == '__main__':
+    main()

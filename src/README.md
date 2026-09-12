@@ -1,42 +1,24 @@
 # Source Code Organization (`src/`)
 
-This directory contains the entire machine learning pipeline for the Crypto & Forex Prediction System. It has been modularized into distinct subfolders based on the phase of the pipeline.
+| Package | File | Role |
+|---|---|---|
+| `data/` | `data_collection.py` | Yahoo Finance OHLCV for BTC-USD, GC=F, SI=F (`--start` for longer history) |
+| | `external_data.py` | DXY, WTI, 10-y yield, S&P 500, VIX, Fear & Greed |
+| | `preprocessing.py` | `DataCleaner` (cleaning, calendar, features), frozen chronological split, train-only scaler, `create_sequences`, **`build_dataset()`** — the single loader used everywhere |
+| | `eda.py` | ADF tests, ACF/PACF, return distributions, volatility clustering |
+| | `sync_live_data.py` | live refresh into `<prefix>_live_features.csv` (never overwrites frozen data) |
+| `models/` | `registry.py` | uniform interface + factory for Naive-Zero, Naive-Mean, ARIMA, Ridge, RandomForest, LightGBM, CatBoost, GRU, LSTM; two-phase fitting; save/load |
+| | `model_gru.py`, `model_lstm.py` | Keras builders |
+| | `ensemble_model.py` | stacked ensemble on out-of-fold predictions (experiment) |
+| `training/` | `tune_models.py` | walk-forward grid search on train+val → `results/tuning/best_params.json` |
+| | `train_models.py` | phase A (train→val metrics, loss curves, importance) + phase B (deployed model on train+val) |
+| `evaluation/` | `cross_validation.py` | expanding-window folds, `cv_evaluate()` |
+| | `backtesting.py` | **the only reader of the test split**: final tables, model selection, `model_status.json` |
+| | `plots.py` | report figures |
+| `inference/` | `prediction.py` | `predict_next_day()`, `predict_all_models()` with held-out metrics and uncertainty band |
+| `api/` | `app.py` | FastAPI |
+| `utils/` | `metrics.py` | RMSE/MAE/MAPE/R², directional accuracy + binomial test, Diebold–Mariano, strategy backtest |
+| | `inverse_transform.py` | `P̂ = P_t · exp(r̂)` |
+| | `reproducibility.py`, `logging_config.py` | seeds, logging |
 
-## 📂 Directory Structure
-
-### `data/`
-Scripts responsible for data acquisition, cleaning, preprocessing, and exploratory testing.
-* **`data_collection.py`**: Fetches raw data from Yahoo Finance API.
-* **`preprocessing.py`**: Handles missing values, scaling (MinMaxScaler), technical indicators (SMA/EMA), and sequence generation for the LSTM.
-* **`stationarity_tests.py`**: Augmented Dickey-Fuller tests to analyze time-series stationarity.
-
-### `models/`
-Defines the core machine learning models and architectures.
-* **`model_lstm.py`**: Neural network architecture building blocks (Keras).
-* **`baseline_models.py`**: Traditional ML baselines (Linear Regression, Random Forest, XGBoost).
-* **`arima_model.py`**: Autoregressive Integrated Moving Average pipeline for linear trend forecasting.
-* **`ensemble_model.py`**: Hybrid approach combining ARIMA and LSTM predictions.
-
-### `training/`
-Scripts to execute the formal training pipeline for each asset.
-* **`train_final_btc.py`**: 2-phase unbiased training pipeline for Bitcoin.
-* **`train_final_gold.py`**: 2-phase unbiased training pipeline for Gold.
-* **`train_final_silver.py`**: 2-phase unbiased training pipeline for Silver.
-* **`training.py`**: Initial/legacy training loop implementations.
-
-### `experiments/`
-Isolated scripts used during the hyperparameter tuning phase.
-* **`experiment_dropout.py`**: Tests varying dropout rates for regularization.
-* **`experiment_lstm_units.py`**: Tests model capacity (e.g., 50 vs 100 hidden units).
-* **`experiment_seq_length.py`**: Tests historical lookback windows (30, 60, 90 days).
-
-### `evaluation/`
-Scripts to evaluate model performance, validate generalizability, and generate metrics.
-* **`evaluation.py`**: Unified module for calculating RMSE, MAE, MAPE, and R² for any model.
-* **`walk_forward.py`**: Simulates production behavior by rolling a fixed window forward day-by-day.
-* **`backtesting.py`**: Extensive final evaluation against naive models and buy-and-hold strategies.
-* **`plot_baselines.py`**: Visualizations for initial baseline comparisons.
-
-### `inference/`
-Production-ready code for making future predictions.
-* **`prediction.py`**: End-to-end pipeline to load a trained model, grab the latest live data, preprocess it, and output tomorrow's forecast.
+Data-flow: `data/raw → preprocessing → build_dataset → {tune, train, stack} → backtesting → results/ → {streamlit, api}`.

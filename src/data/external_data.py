@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from config import RAW_DATA_DIR, DEFAULT_HISTORY_DAYS
+from config import RAW_DATA_DIR, DATA_START_DATE
 
 # External data configuration
 EXTERNAL_SOURCES = {
@@ -68,7 +68,7 @@ def fetch_yfinance_external(source_name):
     print(f"\nFetching {source_name} ({config['description']})...")
     
     ticker = yf.Ticker(config['ticker'])
-    df = ticker.history(period="3y")
+    df = ticker.history(start=DATA_START_DATE)
     
     if df.empty:
         print(f"WARNING: No data returned for {source_name} ({config['ticker']})")
@@ -102,8 +102,8 @@ def fetch_fear_greed_index():
     
     print("\nFetching Bitcoin Fear & Greed Index...")
     
-    # Request ~1200 days of data (covers our 3-year window)
-    url = "https://api.alternative.me/fng/?limit=1200&format=json"
+    # limit=0 returns the full history (from Feb 2018)
+    url = "https://api.alternative.me/fng/?limit=0&format=json"
     
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})

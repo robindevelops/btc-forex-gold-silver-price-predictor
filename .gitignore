@@ -42,3 +42,12 @@ build/
 
 # Logs
 *.log
+!data/models/model_status.json
+!data/models/.gitkeep
+
+# Local caches created by libraries
+catboost_info/
+Library/
+.keras/
+.matplotlib/
+logs/

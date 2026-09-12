@@ -9,27 +9,24 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
-        
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        
-    - name: Run Pytest
-      run: |
-        python -m pytest tests/ -v
-        
-    - name: Basic Import Checks
+    - name: Import checks
       run: |
         python -c "import config"
-        python -c "from src.data.data_collection import DataCollector"
-        python -c "from src.models.model_lstm import build_lstm_model"
+        python -c "from src.data.preprocessing import DataCleaner, build_dataset"
+        python -c "from src.models.registry import make_model, ALL_MODELS"
+        python -c "from src.evaluation.backtesting import main"
+    - name: Run tests
+      run: python -m pytest tests/ -q
+      env:
+        TF_CPP_MIN_LOG_LEVEL: "3"

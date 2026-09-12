@@ -1,49 +1,53 @@
 #!/usr/bin/env python3
+"""
+Automated end-to-end retraining: data → preprocessing → tuning → training → stacking → evaluation → figures.
+
+    python scripts/retrain.py            # full run (tuning included, slow)
+    python scripts/retrain.py --no-tune  # reuse results/tuning/best_params.json
+    python scripts/retrain.py --no-fetch # keep the existing raw data (e.g. when Yahoo rate-limits)
+"""
 import os
 import sys
 import logging
+import argparse
 import subprocess
 
-# Setup logging
-log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+log_dir = os.path.join(ROOT, 'logs')
 os.makedirs(log_dir, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(log_dir, 'retrain.log')),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[logging.FileHandler(os.path.join(log_dir, 'retrain.log')), logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger(__name__)
 
-def run_command(cmd, description):
+
+def run(cmd, description):
     logger.info(f"Starting: {description}")
-    try:
-        result = subprocess.run(cmd, shell=True, check=True, text=True, capture_output=True)
-        logger.info(f"Completed: {description}\n{result.stdout}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed: {description}\nError: {e.stderr}")
+    env = {**os.environ, 'PYTHONPATH': ROOT, 'TF_CPP_MIN_LOG_LEVEL': '3'}
+    result = subprocess.run([sys.executable] + cmd, cwd=ROOT, env=env, text=True, capture_output=True)
+    if result.returncode != 0:
+        logger.error(f"Failed: {description}\n{result.stderr[-3000:]}")
         sys.exit(1)
+    logger.info(f"Completed: {description}")
+
 
 def main():
-    logger.info("Starting automated retraining pipeline...")
-    
-    # 1. Refresh Data
-    run_command("python src/data/data_collection.py", "Data Collection")
-    run_command("python src/data/external_data.py", "External Data Collection")
-    
-    # 2. Preprocess Data
-    run_command("python src/data/preprocessing.py", "Data Preprocessing")
-    
-    # 3. Train Models
-    run_command("python src/training/train_lgbm.py", "LightGBM Training")
-    run_command("python src/training/train_catboost.py", "CatBoost Training")
-    run_command("python src/training/train_deep_learning.py", "Deep Learning Training")
-    
-    # 4. Evaluate Models (assuming this is done during training or a separate script)
-    # If there's an evaluation script, we could run it here.
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--no-fetch', action='store_true')
+    ap.add_argument('--no-tune', action='store_true')
+    args = ap.parse_args()
+    if not args.no_fetch:
+        run(['src/data/data_collection.py'], 'Data collection')
+        run(['src/data/external_data.py'], 'External data collection')
+    run(['src/data/preprocessing.py'], 'Preprocessing')
+    run(['src/data/eda.py'], 'EDA')
+    if not args.no_tune:
+        run(['src/training/tune_models.py'], 'Walk-forward tuning')
+    run(['src/training/train_models.py'], 'Training')
+    run(['src/models/ensemble_model.py'], 'Stacking')
+    run(['src/evaluation/backtesting.py'], 'Final evaluation')
+    run(['src/evaluation/plots.py'], 'Figures')
     logger.info("Retraining pipeline completed successfully.")
-    
+
+
 if __name__ == "__main__":
     main()
