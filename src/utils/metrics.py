@@ -117,3 +117,36 @@ def evaluate_forecast(true_ret, pred_ret, prev_close, naive_pred_ret=None):
 
 # Backwards-compatible names used by older tests
 compute_rmse, compute_mae, compute_mape, compute_r2 = rmse, mae, mape, r2
+
+
+def qlike(true_var, pred_var):
+    """QLIKE loss for variance forecasts (Patton 2011): mean( true/pred − ln(true/pred) − 1 ). Lower is better."""
+    ratio = np.asarray(true_var) / np.maximum(np.asarray(pred_var), 1e-12)
+    return float(np.mean(ratio - np.log(ratio) - 1))
+
+
+def evaluate_vol_forecast(true_logrv, pred_logrv, naive_logrv):
+    """
+    Metrics for a volatility forecast expressed in log realised-volatility space.
+        RMSE/MAE/R² in log space; MAE and MAPE in volatility (%) space; QLIKE on variances;
+        directional accuracy of the *change* in volatility vs the naive persistence forecast;
+        Diebold–Mariano test of squared log errors against the naive forecast.
+    """
+    true_logrv, pred_logrv, naive_logrv = map(np.ravel, (true_logrv, pred_logrv, naive_logrv))
+    tv, pv = np.exp(true_logrv), np.exp(pred_logrv)
+    dm, p_dm = diebold_mariano(true_logrv, pred_logrv, naive_logrv)
+    # direction of the volatility change relative to the last observed volatility (naive)
+    da, n_da, p_da = directional_accuracy(true_logrv - naive_logrv, pred_logrv - naive_logrv)
+    return {
+        'RMSE_log': rmse(true_logrv, pred_logrv), 'MAE_log': mae(true_logrv, pred_logrv), 'R2_log': r2(true_logrv, pred_logrv),
+        'MAE_vol_pct': mae(tv * 100, pv * 100), 'MAPE_vol': mape(tv, pv), 'QLIKE': qlike(tv ** 2, pv ** 2),
+        'DirAcc_pct': da, 'DirAcc_n': n_da, 'DirAcc_pvalue': p_da,
+        'DM_stat_vs_naive': dm, 'DM_pvalue': p_dm, 'pred_std': float(np.std(pred_logrv)), 'true_std': float(np.std(true_logrv)),
+    }
+
+
+def evaluate_task(data, y_real_true, y_real_pred, naive_real, prev_close=None):
+    """Dispatch on the task kind stored in the dataset dict."""
+    if data['kind'] == 'vol':
+        return evaluate_vol_forecast(y_real_true, y_real_pred, naive_real)
+    return evaluate_forecast(y_real_true, y_real_pred, prev_close, naive_pred_ret=naive_real)

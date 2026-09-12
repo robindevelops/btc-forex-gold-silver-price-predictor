@@ -1,53 +1,83 @@
-# Results and Interpretation
+# Results and Interpretation (improved system)
 
-All numbers are produced by `src/evaluation/backtesting.py` from the frozen data and are reproducible with `make pipeline`. Raw tables: `results/cv_results.csv` (walk-forward validation), `results/final_test_results.csv` (untouched test), `results/FINAL_RESULTS.md` (all models, all metrics). Figures: `results/figures/`.
+All numbers are produced by `src/evaluation/backtesting.py` from the frozen data. Raw tables: `results/cv_results.csv` (walk-forward validation), `results/final_test_results.csv` (untouched test), `results/FINAL_RESULTS.md` (all models, all metrics), `results/regime_analysis.csv`, `results/experiments/*.csv`. Figures: `results/figures/`.
 
-Test period for all assets: **2026-02-18 → 2026-07-28** (Bitcoin 161 days, Gold/Silver 111 exchange days). Served models were selected by mean walk-forward RMSE (return space) on the train+val folds; the test set was evaluated once.
+**Data:** Yahoo Finance daily, 2018-01 → 2026-09-12 (Bitcoin 3,147 usable days; Gold/Silver 2,156 exchange days).
+**Split:** train ≤ 2025-09-10 (BTC 2,750 / metals 1,874 windows) · validation ≤ 2026-02-17 (160 / 109) · **unseen test 2026-02-18 → 2026-09-12** (BTC 207 days, Gold/Silver 143 exchange days). Served models are selected by mean walk-forward RMSE on train+val folds; the test set was evaluated once.
 
-## Final results table (test set)
+## 1. Final results table (unseen test set)
 
-| Asset | Model | MAE ($) | RMSE ($) | MAPE % | R² (return) | Directional Acc. (p) | DM p vs naive |
+| Asset | Model | MAE ($) | RMSE ($) | MAPE % | R² (return) | Directional acc. (p) | DM p vs naive |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Bitcoin | Naive (random walk) | 1,093.48 | 1,421.12 | 1.58 | −0.000 | — | — |
-| Bitcoin | **CatBoost (served)** | 1,096.70 | 1,424.81 | 1.59 | −0.005 | 47.8 % (0.74) | 0.57 |
-| Bitcoin | Random Forest | 1,094.69 | 1,414.95 | 1.59 | +0.007 | 52.8 % (0.26) | 0.60 |
-| Bitcoin | GRU | 1,210.18 | 1,534.17 | 1.75 | −0.182 | 52.2 % (0.32) | 0.01 (worse) |
-| Gold | Naive (random walk) | 60.97 | 78.84 | 1.34 | −0.010 | — | — |
-| Gold | **CatBoost (served)** | 61.74 | 80.03 | 1.36 | −0.041 | 47.7 % (0.72) | 0.15 |
-| Gold | LightGBM | 62.00 | 80.51 | 1.37 | −0.054 | 49.5 % (0.58) | 0.05 (worse) |
-| Gold | GRU | 63.45 | 81.48 | 1.40 | −0.072 | 45.9 % (0.83) | 0.07 |
-| Silver | Naive (random walk) | 1.95 | 2.57 | 2.65 | −0.004 | — | — |
-| Silver | **CatBoost (served)** | 1.97 | 2.59 | 2.67 | −0.017 | 48.6 % (0.65) | 0.27 |
-| Silver | LSTM | 2.09 | 2.72 | 2.83 | −0.129 | 49.5 % (0.58) | 0.08 |
-| Silver | GRU | 2.13 | 2.75 | 2.89 | −0.166 | 45.0 % (0.87) | 0.05 (worse) |
+| Bitcoin | Naive (random walk) | 1,066.42 | 1,451.74 | 1.52 | −0.001 | — | — |
+| Bitcoin | **CatBoost (served)** | 1,071.08 | 1,453.76 | 1.53 | −0.004 | 46.9 % (0.83) | 0.74 |
+| Bitcoin | LightGBM | 1,076.49 | 1,446.18 | 1.54 | +0.010 | 51.2 % (0.39) | 0.79 |
+| Bitcoin | Stacked ensemble | 1,061.34 | 1,442.94 | 1.52 | +0.013 | 50.2 % (0.50) | 0.44 |
+| Gold | Naive (random walk) | 58.26 | 75.76 | 1.29 | −0.002 | — | — |
+| Gold | **LightGBM (served)** | 58.02 | 75.30 | 1.29 | +0.008 | 51.0 % (0.43) | 0.42 |
+| Gold | CatBoost | 57.82 | 75.78 | 1.28 | −0.004 | 54.5 % (0.16) | 0.95 |
+| Silver | Naive (random walk) | 1.79 | 2.37 | 2.49 | −0.001 | — | — |
+| Silver | **LightGBM (served)** | 1.75 | 2.32 | 2.42 | **+0.044** | **62.2 % (0.002)** | **0.002** |
+| Silver | Stacked ensemble | 1.75 | 2.32 | 2.42 | +0.043 | 62.2 % (0.002) | 0.023 |
+| Silver | Random Forest | 1.76 | 2.34 | 2.44 | +0.025 | 55.9 % (0.09) | 0.16 |
 
-(Full 10-model tables per asset in `results/FINAL_RESULTS.md`.)
+Full 10-model tables per asset: `results/FINAL_RESULTS.md`.
 
-## Experiment 1 — Baselines
-The zero-return random walk is the strongest or joint-strongest forecast on every asset, in both validation and test. The historical-mean (drift) forecast is within 0.2 % of it. ARIMA — order (1,0,0) for Bitcoin, (2,0,2) Gold, (3,0,2) Silver, chosen by AIC — is *worse* than the random walk on the test set (DM p = 0.30 / 0.03 / 0.01), i.e. the small autocorrelations it fits in-sample do not persist.
+**Reading:** Bitcoin and Gold remain at the random-walk floor (all models within ±0.5 % of the naive RMSE, directional accuracy 47–55 %, no DM test significant). **Silver is the exception**: the served LightGBM has R² = +0.044 in return space, 62.2 % directional accuracy on 143 days (binomial p = 0.002) and a lower squared error than the random walk with Diebold–Mariano p = 0.002. The stacked ensemble reproduces the same result. This is the first statistically significant out-of-sample result in the project.
 
-## Experiment 2 — The original models, evaluated correctly
-`docs/AUDIT_SUMMARY.md`: once the price-reconstruction bug and the synthetic weekend rows were removed, the original GRU/LightGBM/stack had negative return-space R² on every asset and the served stack was a constant predictor. The originally reported "R² ≈ 0.94" was the random-walk illusion on price levels.
+**Caveat on Silver.** The walk-forward validation directional accuracy of the same model was 52.8 % (RMSE 0.3 % better than naive), so the test period is unusually favourable; the regime table shows the edge is present in every regime of the test window (56–68 % hits in all six slices), but one 143-day window is a single draw and the effect may not persist. It is reported as a genuine but period-specific result, not as a proven edge.
 
-## Experiment 3 — Tuned models under walk-forward validation (`figures/model_comparison_cv.png`)
-* On the 4 expanding folds, the regularised tabular models (Ridge, LightGBM, CatBoost) are within ±0.5 % of the naive RMSE for Bitcoin and *marginally* better than naive for Gold (0.01312 vs 0.01326, −1.1 %) and Silver (0.02797 vs 0.02805, −0.3 %). Fold-to-fold standard deviations (±0.0026 BTC, ±0.0041 Gold, ±0.0150 Silver) are an order of magnitude larger than these differences, so **no model is distinguishable from the random walk on validation**.
-* The tuner consistently chose the most regularised configurations (LightGBM: 4 leaves; CatBoost: depth 3–5, learning-rate 0.01; Ridge: α = 100; early stopping at 10 iterations for Bitcoin and Silver, 67 for Gold). The models learned that the best-generalising function is approximately a constant drift — the served CatBoost's test predictions have a standard deviation of 0.0001–0.0003 against a true return standard deviation of 0.017–0.034.
-* GRU and LSTM are the worst models on every asset in validation (R² −0.10 to −0.22) despite being reduced to a single 16–32-unit layer with dropout and early stopping: with 500–700 windows they fit noise.
+## 2. Before vs after (identical unseen days: 2026-02-18 → 2026-07-28)
 
-## Experiment 4 — Untouched test set (`figures/model_comparison_test.png`, `figures/<asset>_actual_vs_predicted.png`)
-* **No model beats the random walk by a statistically significant margin** (all Diebold–Mariano p > 0.05 in the "better" direction). The served CatBoost is 0.3 % (BTC), 1.5 % (Gold) and 0.6 % (Silver) *worse* than naive on return-RMSE — inside the noise.
-* GRU on Bitcoin and Silver, ARIMA on Gold and Silver, and LightGBM on Gold are *significantly worse* than the random walk (DM p ≤ 0.05).
-* Directional accuracy is 42–53 % for every model on every asset, and no value is significant (smallest binomial p = 0.26, Random Forest on Bitcoin, 52.8 % of 161 days). Random Forest on Bitcoin also has the best test R² (+0.007) and the only positive strategy return (+3.1 % vs −6.1 % buy-and-hold) — but it was **not** the validation winner (0.02555 CV RMSE, 7th of 9), so treating it as the result would be selection on the test set.
-* The long/flat strategy of the served model equals the drift forecast (always long), so it reproduces buy-and-hold minus costs; the LSTM's flat/long switching happens to limit losses on Gold (+0.2 % vs −17.6 %) and Silver (−9.1 % vs −21.7 %), with RMSE that is worse than naive — a reminder that direction and magnitude are different tasks.
+The 3-year system (`results/archive_3y_final/`) and the improved system compared on exactly the same days. Yahoo revised a few historical closes between the two downloads (mean < 0.005 %, max 0.75 % on one Bitcoin day), so each system is also shown against the naive forecast computed on its own data. Source: `results/experiments/before_after.csv`.
 
-## Experiment 5 — Analysis
-* **Over-fitting** (`figures/overfitting_gap.png`): validation RMSE is 1.0× (BTC), 2.0× (Gold) and 3.0× (Silver) the training RMSE — but the random walk shows exactly the same ratio. The gap is regime shift (the validation/test windows are far more volatile than training), not memorisation; the phase-A models (Ridge α = 100, depth-3 trees, 10–70 boosting iterations, 2–13 epochs) have almost no capacity to memorise.
-* **Feature importance** (`figures/<asset>_feature_importance.png`): the boosted models lean on volatility-regime features (`bb_width`, `atr_norm`, `volatility_30d`), trend-distance ratios (`ema30_ratio`, `macd_hist_norm`) and, for Bitcoin, `fear_greed` and `sp500_return`. These are the features that shift the conditional *mean* only marginally; their real information is about the conditional *variance*, which a point forecast cannot exploit (see Future Work).
-* **Stacked ensemble** (`results/stacking/`): with non-negative Ridge on out-of-fold predictions the weights collapse to **0.0 for all four base models on Bitcoin** (intercept only) and to small weights (0.04–0.16) on Gold/Silver. The stack cannot find a combination of base models with out-of-sample signal — an independent confirmation of the conclusion.
-* **Loss curves** (`figures/<asset>_loss_curves.png`): validation loss reaches its minimum within 2–13 epochs and then rises while training loss keeps falling — textbook over-fitting that early stopping catches.
+| Asset | System | Model | MAE ($) | RMSE ($) | MAPE % | RMSE (ret) | R² (ret) | Dir. acc. (p) | DM p |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Bitcoin | before (3 y) | CatBoost | 1,096.70 | 1,424.81 | 1.59 | 0.02068 | −0.005 | 47.8 % (0.74) | 0.57 |
+| Bitcoin | **after (2018→)** | CatBoost | 1,100.64 | 1,425.57 | 1.59 | 0.02071 | −0.007 | 46.6 % (0.83) | 0.34 |
+| Bitcoin | naive (new data) | — | 1,092.36 | 1,420.93 | 1.58 | 0.02064 | −0.000 | — | — |
+| Gold | before (3 y) | CatBoost | 61.74 | 80.03 | 1.36 | 0.01752 | −0.041 | 47.7 % (0.72) | 0.15 |
+| Gold | **after (2018→)** | LightGBM | 60.62 | 78.39 | 1.34 | 0.01718 | −0.002 | 49.5 % (0.58) | 0.56 |
+| Gold | naive (new data) | — | 60.87 | 78.79 | 1.34 | 0.01725 | −0.010 | — | — |
+| Silver | before (3 y) | CatBoost | 1.97 | 2.59 | 2.67 | 0.03418 | −0.017 | 48.6 % (0.65) | 0.27 |
+| Silver | **after (2018→)** | LightGBM | 1.91 | 2.51 | 2.60 | 0.03322 | +0.041 | 61.3 % (0.011) | 0.006 |
+| Silver | naive (new data) | — | 1.96 | 2.57 | 2.66 | 0.03399 | −0.004 | — | — |
 
-## Conclusion
-At a one-day horizon, with ~700–1,000 daily observations and price/volume/macro/sentiment features, **neither classical time-series models, regularised tree ensembles nor recurrent networks produce forecasts that are statistically distinguishable from the random walk** for Bitcoin, Gold or Silver. The tuned, validation-selected models converge to the unconditional drift, and every model that deviates from it (ARIMA, GRU, LSTM) is *significantly worse*. This is consistent with weak-form market efficiency and with the reproducibility literature on financial deep learning. The project's contribution is the leakage-audited benchmark, the statistical testing, and a demonstration system that reports its own uncertainty honestly — not a forecasting edge.
+* **Gold:** RMSE (return) improved 1.9 %; the served model now marginally beats the naive forecast instead of being 1.5 % worse.
+* **Silver:** RMSE (return) improved 2.8 %; from worse-than-naive to significantly better than naive.
+* **Bitcoin:** unchanged within noise (the served CatBoost is 0.3 % worse than naive both before and after). On the full test window LightGBM and the stack do slightly better than naive but not significantly, and CatBoost was the validation winner by 0.06 %.
 
-## What would change the conclusion (Future Work)
-Longer history (2018→, 3× more data), volatility (GARCH-type) targets where the features clearly carry information, multi-day horizons, probabilistic forecasts (quantile regression) whose calibration can be scored, intraday data, and regime-aware models.
+## 3. What produced the improvement
+
+| Change | Evidence | Effect |
+|---|---|---|
+| 2.9× more training data (2018→) | `E1_data_size.csv`: fixed validation window, same features/params | Bitcoin −1.0 to −1.7 % val RMSE; Gold/Silver ±0.4 % (neutral) |
+| New features: HAR realised volatilities (`rv_1d/5d/22d`), EWMA volatility, 20-day momentum | `E2_feature_ablation.csv` | no single group moves CV RMSE by more than ±0.5 %; volatility features matter most for the metals' importance rankings |
+| Re-tuning with more data | `results/tuning/*.csv` | tuner now accepts slightly more capacity (15–31 leaves, depth 5–7) but all configurations are within 0.3–2 %; fold std ≈ 20 % of the mean |
+| Stacked ensemble with more data | `results/stacking/*.json` | weights no longer collapse to zero (BTC: LightGBM 0.39, CatBoost 0.31; Gold: all four; Silver: LightGBM 1.1, CatBoost 0.47, GRU 0.56) — the base models now carry combinable out-of-sample signal |
+| Split defined by target dates (exact embargo) | `build_dataset` | correctness for multi-day targets; no effect on the 1-day task |
+
+## 4. Design experiments (validation only) — `results/experiments/experiments_summary.md`
+
+* **E1 data size:** more history helps Bitcoin (−1 to −1.7 % RMSE on the fixed validation window) and is neutral for the metals; kept because it also stabilises tuning.
+* **E2 feature ablation:** dropping any one group changes walk-forward RMSE by −0.15 % … +0.45 % — inside noise. The full set is kept because it is cheap, interpretable and no group hurts; the "return path" group is the most useful for Gold (+0.45 % when removed).
+* **E3 horizon:** the 5-day return is not more predictable than the next day (Gold models 0.6–0.8 % better than naive, Bitcoin worse); the served horizon stays 1 day.
+* **E4 volatility:** 22-day realised volatility *is* more predictable than the return (Bitcoin Ridge 11.5 % better than persistence), but only ~4 % better than a RiskMetrics EWMA and worse than EWMA for Silver; not productised — kept as a documented experiment.
+
+## 5. Performance across market regimes (test period, served model vs naive) — `results/regime_analysis.csv`
+
+| Asset | Regime | Days | MAE % served | MAE % naive | Direction hits |
+|---|---|---:|---:|---:|---:|
+| Bitcoin | low / medium / high volatility | 69 / 69 / 69 | 1.30 / 1.64 / 1.65 | 1.29 / 1.62 / 1.66 | 46 / 46 / 48 % |
+| Bitcoin | down-trend / up-trend | 96 / 111 | 1.64 / 1.44 | 1.63 / 1.44 | 41 / 52 % |
+| Gold | low / medium / high volatility | 48 / 47 / 48 | 1.27 / 1.26 / 1.34 | 1.27 / 1.26 / 1.35 | 48 / 51 / 54 % |
+| Silver | low / medium / high volatility | 48 / 47 / 48 | 2.05 / 2.32 / 2.89 | 2.14 / 2.38 / 2.93 | 67 / 64 / 56 % |
+| Silver | down-trend / up-trend | 81 / 62 | 2.50 / 2.32 | 2.58 / 2.36 | 64 / 60 % |
+
+Errors scale with volatility for every asset (as they must); the served models neither improve nor degrade relative to the naive forecast in any regime for Bitcoin/Gold, while Silver's advantage holds in every regime.
+
+## 6. Over-fitting check — `figures/overfitting_gap.png`, `results/train_val_metrics.csv`
+Validation RMSE is 0.8× (Bitcoin), 2.1× (Gold) and 3.0× (Silver) the training RMSE, and the random walk shows the same ratios: the gap is regime shift (the validation window is far more volatile than 2018–2025 on average), not memorisation. Early stopping selected 10–50 boosting iterations and 1–12 epochs.
+
+## 7. Conclusion
+With 8.6 years of daily data and a leakage-free pipeline, the next-day return of Bitcoin and Gold remains indistinguishable from a random walk (consistent with weak-form efficiency), while Silver shows a statistically significant but period-specific edge (62 % directional accuracy, DM p = 0.002 on 143 unseen days). The improvements over the 3-year system are real but small (1.9–2.8 % RMSE on the metals, none on Bitcoin) and came from data volume rather than model complexity. The demonstration value of the system — predict any unseen day, reveal the actual, measure the error, compare ten models against the random walk — is independent of whether the edge persists, and that is the contribution the project claims.

@@ -40,12 +40,21 @@ def get_prefix(asset_name):
 DATA_START_DATE = '2018-01-01'
 
 # ---------------------------------------------------------------------------
-# Prediction task
+# Prediction tasks
 # ---------------------------------------------------------------------------
-# Target: next-day log return  y_t = ln(P_{t+1} / P_t)
-# Horizon: 1 trading day (Bitcoin trades every calendar day; Gold/Silver on exchange days)
+# The served task is the next-day log return  y_t = ln(P_{t+1} / P_t).
+# Additional tasks are evaluated as experiments (src/experiments/):
+#   return_5d : 5-day forward log return  sum_{k=1..5} r_{t+k}          (overlapping targets → embargo)
+#   vol_5d    : log of 5-day forward realised volatility  ln sqrt(mean r²_{t+1..t+5})
 TARGET_COL = 'log_return'
 PREDICTION_HORIZON_DAYS = 1
+TASKS = {
+    'return_1d': {'kind': 'return', 'horizon': 1, 'naive_feature': None,       'label': 'Next-day log return'},
+    'return_5d': {'kind': 'return', 'horizon': 5, 'naive_feature': None,       'label': '5-day forward log return'},
+    'vol_5d':    {'kind': 'vol',    'horizon': 5, 'naive_feature': 'rv_5d',    'label': '5-day forward realised volatility (log)'},
+    'vol_22d':   {'kind': 'vol',    'horizon': 22, 'naive_feature': 'rv_22d',  'label': '22-day forward realised volatility (log)'},
+}
+DEFAULT_TASK = 'return_1d'
 
 # ---------------------------------------------------------------------------
 # Frozen chronological split (identical for all assets, by calendar date)
@@ -84,13 +93,14 @@ DEFAULT_PARAMS = {
 
 BEST_PARAMS_PATH = os.path.join(TUNING_DIR, 'best_params.json')
 
-def get_params(model_name, asset_name=None):
-    """Tuned params for (model, asset) if tuning has been run, else defaults."""
+def get_params(model_name, asset_name=None, task=DEFAULT_TASK):
+    """Tuned params for (task, asset, model) if tuning has been run, else defaults.
+    best_params.json layout: {task: {asset: {model: params}}} (the served task is 'return_1d')."""
     params = dict(DEFAULT_PARAMS[model_name])
     if asset_name and os.path.exists(BEST_PARAMS_PATH):
         with open(BEST_PARAMS_PATH) as f:
             best = json.load(f)
-        params.update(best.get(asset_name, {}).get(model_name, {}))
+        params.update(best.get(task, {}).get(asset_name, {}).get(model_name, {}))
     return params
 
 # Walk-forward (expanding window) validation folds inside train+val
@@ -101,6 +111,8 @@ CV_FOLDS = 4
 # walk-forward validation (NOT test) results; hand-editing is discouraged.
 # ---------------------------------------------------------------------------
 MODEL_STATUS_PATH = os.path.join(MODELS_DIR, 'model_status.json')
+EXPERIMENTS_DIR = os.path.join(RESULTS_DIR, 'experiments')
+os.makedirs(EXPERIMENTS_DIR, exist_ok=True)
 
 def load_model_status():
     if os.path.exists(MODEL_STATUS_PATH):

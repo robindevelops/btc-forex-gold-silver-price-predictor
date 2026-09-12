@@ -35,7 +35,7 @@ where `P_t` is the close on trading day `t`. A price forecast is derived afterwa
 | VIX | Yahoo Finance | `^VIX` | all assets |
 | Crypto Fear & Greed | alternative.me | — | Bitcoin |
 
-Stored history: **2023-07-28 → 2026-07-28** (BTC 1,097 days; Gold/Silver 754 exchange days). `config.DATA_START_DATE = 2018-01-01` lets `make collect-data` download a longer history when Yahoo is not rate-limiting; all downstream steps are date-driven and re-run unchanged.
+Stored history: **2018-01-01 → 2026-09-12** (BTC 3,177 raw / 3,147 usable days; Gold/Silver 2,186 raw / 2,156 usable exchange days), downloaded with `config.DATA_START_DATE = 2018-01-01`. The earlier 3-year version (2023-07 → 2026-07) is kept in `data/raw_3y_backup/` and its results in `results/archive_3y_final/` for the before/after comparison.
 
 ### Cleaning (`src/data/preprocessing.py::DataCleaner.clean_data`)
 1. Drop duplicate timestamps, sort chronologically, drop non-positive prices.
@@ -55,33 +55,36 @@ See `docs/FEATURES.md` for the full table with formulas. Design rules:
 * **Stationary only** — raw levels (open/high/low/close/volume, EMA, Bollinger bands, ATR, MACD) are kept in `*_features.csv` for charts but are never model inputs (`config.LEVEL_COLUMNS`). They are converted to ratios (`price/EMA − 1`, `%B`, `ATR/price`, …). Reason: the Gold/Silver test period lies entirely above the training price range, so a level feature would be out-of-distribution for every test day.
 * **Asset-specific** — Bitcoin gets sentiment (Fear & Greed), day-of-week (7-day market) and volume change; metals get macro drivers (DXY, oil, yields); Silver additionally gets gold's same-day return.
 
-Bitcoin: 24 features · Gold: 23 · Silver: 24.
+Bitcoin: 29 features · Gold: 28 · Silver: 29 (HAR realised volatilities, EWMA volatility and 20-day momentum were added in the improvement phase).
 
 ## 4. Split, scaling, sequences
 
 ```
-train      2023-08/09 → 2025-09-10      (BTC 746 days, metals 504 days)
-validation 2025-09-11 → 2026-02-17      (160 / 109)
-test       2026-02-18 → 2026-07-28      (161 / 111)   ← touched ONCE
+train      2018-03 → 2025-09-10          (BTC 2,750 windows, metals 1,874)
+validation 2025-09-11 → 2026-02-17       (160 / 109)
+test       2026-02-18 → 2026-09-12       (207 / 143)   ← touched ONCE
 ```
 
 * Chronological by calendar date (`config.TRAIN_END`, `config.VAL_END`), identical for all assets, **no shuffling** — a random split would put tomorrow in the training set of today.
+* The split is defined by the dates the **target** covers: a training target must end on or before `TRAIN_END`, a validation target must start after `TRAIN_END` and end on or before `VAL_END`, a test target must start after `VAL_END`. For multi-day experimental targets this is an exact purge/embargo; walk-forward folds additionally purge the last h−1 training samples before each validation block.
+* The target is standardised with the training mean/std (`data['fwd']` / `data['inv']`); tree models are unaffected, recurrent models train on a unit-variance target.
 * `MinMaxScaler` fitted on the **training rows only** and applied to validation/test. Test-period feature values may fall outside [0, 1]; that is expected and proves the scaler did not see them.
-* Windows of `SEQ_LEN = 30` rows feed the recurrent models; the last row of each window feeds the tabular models (`build_dataset` in `preprocessing.py`). Both see the same samples and predict the same target, so every model is compared on identical days.
+* Windows of `SEQ_LEN = 30` rows feed the recurrent models; the last row of each window feeds the tabular models (`build_dataset(asset, task=…)` in `preprocessing.py`). Both see the same samples and predict the same target, so every model is compared on identical days. `build_dataset` also serves the experimental tasks (`return_5d`, `vol_5d`, `vol_22d`) and a `train_start` option for the data-size experiment.
 * Windows are cut from the concatenated train|val|test frame so the first validation/test samples can look back into earlier rows — this uses only past data and loses no test days.
 
 ## 5. Baselines and models (`src/models/registry.py`)
 
 | Family | Model | Input | Notes |
 |---|---|---|---|
-| Baseline | **Naive-Zero** | — | ŷ = 0 ⇔ tomorrow's price = today's. The random walk. |
+| Baseline | **Naive** | — | ŷ = 0 ⇔ tomorrow's price = today's (random walk); for the volatility task: last realised volatility (persistence). |
 | Baseline | Naive-Mean | — | ŷ = mean training return (drift). |
 | Baseline | ARIMA(p,0,q) | return series | order by AIC on train, one-step walk-forward. |
-| Linear ML | Ridge | 24 features (day *t*) | L2 regularised linear regression. |
+| Baseline | EWMA | volatility task only | RiskMetrics λ = 0.94. |
+| Linear ML | Ridge | 28–29 features (day *t*) | L2 regularised linear regression. |
 | Tree ML | Random Forest | same | bagged trees, depth-limited. |
 | Tree ML | **LightGBM** | same | gradient-boosted trees, early-stopped. |
 | Tree ML | CatBoost | same | ordered boosting, early-stopped. |
-| Deep | GRU | 30 × 24 window | 1 GRU layer (16/32 units) + dropout + dense. |
+| Deep | GRU | 30 × 28–29 window | 1 GRU layer (32 units) + dropout + dense. |
 | Deep | LSTM | same | same shape as GRU. |
 | Ensemble | Stacked | OOF predictions | non-negative Ridge over base models (experiment). |
 
@@ -114,6 +117,9 @@ Inside each fold the last 15 % of the fold's training window is the early-stoppi
 | Strategy backtest | — | Long/flat rule, 10 bps cost, vs buy-and-hold: economic relevance. |
 | Train vs validation RMSE | return | Over-fitting gap (`results/train_val_metrics.csv`, `figures/overfitting_gap.png`). |
 
+## 7b. Design experiments (`src/experiments/run_experiments.py`)
+E1 data size (3-year vs full history on the fixed validation window), E2 feature-group ablation, E3 horizon (1-day vs 5-day return), E4 22-day realised-volatility target — all on validation folds only, logged to `results/experiments/` with a Markdown summary. `src/experiments/before_after.py` compares the archived 3-year system with the current one on identical unseen days.
+
 ## 8. Reproducibility
 
 `src/utils/reproducibility.py::set_all_seeds(42)` seeds Python, NumPy and TensorFlow; tree models use `random_state=42`. Pinned `requirements.txt`. `make pipeline` (or `python scripts/retrain.py --no-fetch`) reproduces every number in `results/` from `data/raw/`.
@@ -132,3 +138,5 @@ Inside each fold the last 15 % of the fold's training window is the early-stoppi
 | Synthetic rows | none | `test_commodities_keep_trading_calendar` |
 | Price reconstruction | exact | `test_true_target_reconstructs_actual_close_exactly` |
 | Test set touched more than once | no | only `backtesting.py` reads `X_test` |
+| Multi-day targets straddling a split | no | split by target dates; `test_task_targets_are_future_only_and_embargoed` |
+| Demo prediction using future rows | no | `predict_for_date` slices `features.loc[:as_of]`; `test_predict_for_date_uses_only_past_data_and_reveals_actual` |

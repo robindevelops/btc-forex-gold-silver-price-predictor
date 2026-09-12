@@ -1,25 +1,21 @@
 """
 Price reconstruction from a predicted log return.
 
-    P̂_{t+1} = P_t · exp(r̂_{t+1})
+    P̂_{t+h} = P_t · exp(r̂)
 
-`P_t` is the actual close on day t, passed in explicitly (from the unscaled feature
-frame).  Earlier versions guessed the price column inside the scaled window and
-picked `open` by mistake, which corrupted every USD metric; that API is gone.
+`P_t` is the actual close on day t, passed in explicitly (from the unscaled feature frame).
+Earlier versions guessed the price column inside the scaled window and picked `open` by
+mistake, which corrupted every USD metric; that API is gone.
 """
 import numpy as np
 
 
-def reconstruct_price(y_pred_scaled, prev_close, scaler, target_col_idx):
+def reconstruct_price(log_return, prev_close):
     """
     Args:
-        y_pred_scaled : (n,) or (n,1) scaled log-return predictions (or true scaled targets)
-        prev_close    : (n,) actual close price on day t  (unscaled, USD)
-        scaler        : the fitted MinMaxScaler (used only to unscale the target column)
-        target_col_idx: index of the target column inside the scaler
+        log_return : (n,) real (un-standardised) log-return predictions or true targets
+        prev_close : (n,) actual close price on day t (USD)
     Returns:
-        (n,) reconstructed USD close for day t+1
+        (n,) reconstructed USD close for day t+h
     """
-    lo, hi = scaler.data_min_[target_col_idx], scaler.data_max_[target_col_idx]
-    log_ret = np.ravel(y_pred_scaled) * (hi - lo) + lo
-    return np.ravel(prev_close) * np.exp(log_ret)
+    return np.ravel(prev_close) * np.exp(np.ravel(log_return))

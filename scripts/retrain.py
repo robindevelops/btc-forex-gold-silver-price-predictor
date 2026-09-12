@@ -46,6 +46,7 @@ def main():
     run(['src/models/ensemble_model.py'], 'Stacking')
     run(['src/evaluation/backtesting.py'], 'Final evaluation')
     run(['src/evaluation/plots.py'], 'Figures')
+    run(['src/experiments/run_experiments.py'], 'Design experiments')
     logger.info("Retraining pipeline completed successfully.")
 
 

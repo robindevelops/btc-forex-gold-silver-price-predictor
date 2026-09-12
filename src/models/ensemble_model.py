@@ -44,7 +44,7 @@ def fit_stack(asset, bases, data=None):
     data = data or build_dataset(asset)
     oof_cols, idx_ref = [], None
     for b in bases:
-        _, oof, idx = cv_evaluate(b, get_params(b, asset), data, n_splits=CV_FOLDS, return_oof=True)
+        _, oof, idx = cv_evaluate(b, get_params(b, asset, data['task']), data, n_splits=CV_FOLDS, return_oof=True)
         oof_cols.append(oof)
         idx_ref = idx
     y = np.concatenate([data['y_train'], data['y_val']])[idx_ref].ravel()

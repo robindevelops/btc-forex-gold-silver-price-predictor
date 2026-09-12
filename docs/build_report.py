@@ -75,8 +75,11 @@ best = json.load(open(os.path.join(TUNING_DIR, 'best_params.json')))
 stack = {a: json.load(open(os.path.join(RESULTS_DIR, 'stacking', f'{a.lower()}_stack_weights.json'))) for a in ASSETS}
 tv_piv = tv.pivot_table(index=['asset', 'model'], columns='split', values='RMSE_ret')
 
-ORDER = ['Naive-Zero', 'Naive-Mean', 'ARIMA', 'Ridge', 'RandomForest', 'LightGBM', 'CatBoost', 'GRU', 'LSTM', 'Stacked']
-NICE = {'Naive-Zero': 'Naive (random walk)', 'Naive-Mean': 'Historical mean', 'RandomForest': 'Random Forest', 'Stacked': 'Stacked ensemble'}
+ORDER = ['Naive', 'Naive-Mean', 'ARIMA', 'Ridge', 'RandomForest', 'LightGBM', 'CatBoost', 'GRU', 'LSTM', 'Stacked']
+NICE = {'Naive': 'Naive (random walk)', 'Naive-Mean': 'Historical mean', 'RandomForest': 'Random Forest', 'Stacked': 'Stacked ensemble'}
+BA = pd.read_csv(os.path.join(RESULTS_DIR, 'experiments', 'before_after.csv'))
+EXP = {k: pd.read_csv(os.path.join(RESULTS_DIR, 'experiments', f)) for k, f in (('E1', 'E1_data_size.csv'), ('E2', 'E2_feature_ablation.csv'), ('E3', 'E3_horizon.csv'), ('E4', 'E4_volatility.csv'))}
+REG = pd.read_csv(os.path.join(RESULTS_DIR, 'regime_analysis.csv'))
 
 
 def row(asset, model):
@@ -195,8 +198,8 @@ def results_table(asset):
             continue
         name = NICE.get(m, m) + (' (served)' if m == served else '')
         cvtxt = f"{c['RMSE_ret_mean']:.5f} ± {c['RMSE_ret_std']:.5f}" if c is not None else '—'
-        da = '—' if m == 'Naive-Zero' else f"{r['DirAcc_pct']:.1f} ({r['DirAcc_pvalue']:.2f})"
-        dm = '—' if m == 'Naive-Zero' else f"{r['DM_pvalue']:.2f}"
+        da = '—' if m == 'Naive' else f"{r['DirAcc_pct']:.1f} ({r['DirAcc_pvalue']:.2f})"
+        dm = '—' if m == 'Naive' else f"{r['DM_pvalue']:.2f}"
         data.append([name, cvtxt, f"{r['RMSE_ret']:.5f}", f"{r['R2_ret']:+.3f}", f"{r['MAE_usd']:,.2f}", f"{r['RMSE_usd']:,.2f}",
                      f"{r['MAPE_usd']:.2f}", da, dm])
     t = table(data, [3.5 * cm, 2.9 * cm, 1.7 * cm, 1.5 * cm, 1.6 * cm, 1.7 * cm, 1.3 * cm, 1.9 * cm, 1.3 * cm], font=7.6)
@@ -212,33 +215,37 @@ def exec_summary_flowables():
         'Bitcoin (BTC-USD), Gold (GC=F futures) and Silver (SI=F futures) — and presents the forecast, together with its '
         'measured reliability, in a web dashboard and a REST API. The forecast target is the next-day log return '
         '<i>y<sub>t</sub> = ln(P<sub>t+1</sub>/P<sub>t</sub>)</i>; the price shown to the user is recovered as '
-        '<i>P<sub>t</sub>·exp(ŷ)</i>. Daily data from Yahoo Finance (2023-07-28 to 2026-07-28) is enriched with macro series '
-        '(US Dollar Index, WTI crude, 10-year Treasury yield, S&amp;P 500, VIX) and the crypto Fear &amp; Greed index.'))
+        '<i>P<sub>t</sub>·exp(ŷ)</i>. Daily data from Yahoo Finance (2018-01-01 to 2026-09-12; Bitcoin 3,147 usable days, '
+        'Gold/Silver 2,156 exchange days) is enriched with macro series (US Dollar Index, WTI crude, 10-year Treasury yield, '
+        'S&amp;P 500, VIX) and the crypto Fear &amp; Greed index.'))
     f.append(P(
         f'<b>Methodology.</b> A frozen chronological split (train ≤ {TRAIN_END}, validation ≤ {VAL_END}, test = '
-        f'2026-02-18 → 2026-07-28) with no shuffling; a scaler fitted on training rows only; 23–24 stationary, backward-looking '
+        f'2026-02-18 → 2026-09-12) with no shuffling; a scaler fitted on training rows only; 28–29 stationary, backward-looking '
         f'features; hyper-parameters and the served model chosen by {CV_FOLDS}-fold expanding-window walk-forward validation inside '
         'train+val; and a single evaluation of the untouched test set. Ten model families are compared on identical days: a '
         'random-walk baseline, historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM and a stacked ensemble. '
-        'Ten specific data-leakage checks are enforced by a 28-case test suite.'))
+        'Twelve specific data-leakage checks are enforced by a 31-case test suite.'))
     f.append(P(
-        '<b>Result.</b> The validation-selected model for all three assets is CatBoost (shallow, heavily regularised gradient-boosted '
-        'trees). On the untouched test set its return-RMSE is within 0.3–1.5 % of the random-walk forecast (Diebold–Mariano '
-        'p = 0.15–0.57), and its directional accuracy is 47.7–48.6 % (not significantly different from 50 %). <b>No model beats '
-        'the random walk by a statistically significant margin</b>; the recurrent networks and ARIMA are significantly <i>worse</i> '
-        '(p ≤ 0.05). The tuned models converge to the unconditional drift, which is the expected outcome under weak-form market '
-        'efficiency at a one-day horizon with ~700–1,000 daily observations. The project therefore delivers a validated negative '
-        'result, not a forecasting edge, and the application reports this honestly next to every forecast.'))
+        '<b>Result.</b> The validation-selected models are gradient-boosted trees (CatBoost for Bitcoin, LightGBM for Gold and Silver). '
+        'On the untouched test set, Bitcoin and Gold remain at the random-walk floor: return-RMSE within ±0.5 % of the naive forecast '
+        '(Diebold–Mariano p = 0.42–0.74), directional accuracy 47–51 %. <b>Silver is the exception</b>: 62.2 % directional accuracy on '
+        '143 unseen days (binomial p = 0.002), R² = +0.044 in return space and a significantly lower squared error than the random '
+        'walk (DM p = 0.002), consistent across every volatility and trend regime of the window — but its walk-forward figure is '
+        '52.8 %, so the effect is period-specific and reported as such. Overall the results are consistent with weak-form market '
+        'efficiency; the application reports the measured error next to every forecast.'))
     f.append(P(
         '<b>Improvement over the initial version.</b> An audit of the original codebase found a price-reconstruction bug that '
         'corrupted every dollar metric, 30 % fabricated weekend rows for the metals, hyper-parameters selected on the test set, '
         'early stopping on training data, non-stationary price-level features, a served ensemble that predicted a constant, a '
-        'broken inference path and misleading R² values (≈ 0.95 on price levels, which a random walk also achieves). All were '
-        'fixed; the pipeline was re-run end-to-end and reproduces every reported number bit-for-bit.'))
+        'broken inference path and misleading R² values (≈ 0.95 on price levels, which a random walk also achieves). All were fixed. '
+        'A second, measured improvement phase then added 2.9× more training data (2018 →), volatility/momentum features, re-tuning, '
+        'and logged design experiments: on identical unseen days the served models improved by 1.9 % (Gold) and 2.8 % (Silver) in '
+        'return-RMSE and were unchanged for Bitcoin.'))
     f.append(P(
-        '<b>Status.</b> Working Streamlit dashboard (asset selection, indicator overlays, next-day forecast with uncertainty band, '
-        'multi-model comparison, validation and test tables, figures) and FastAPI endpoints; reproducible pipeline '
-        '(<font face="Mono">make pipeline</font>); documentation for methodology, features, results, limitations and viva.'))
+        '<b>Status.</b> Working Streamlit dashboard (live forecast with uncertainty band, a <i>Predict-a-Day</i> demonstration on the '
+        'unseen test period that reveals the actual price and the error, a full prediction history, validation/test tables, regime '
+        'analysis and experiment tables) and FastAPI endpoints; reproducible pipeline (<font face="Mono">make pipeline</font>); '
+        'documentation for methodology, features, results, limitations, demonstration and viva.'))
     return f
 
 
@@ -294,7 +301,8 @@ def build_report():
         'Evaluate once on an untouched test period with metrics that are meaningful for returns (RMSE/MAE/R² in return space, '
         'directional accuracy with a significance test, Diebold–Mariano test against the random walk, strategy backtest).',
         'Deliver a demonstrable application (dashboard + API) that communicates the forecast, its horizon, the model used, '
-        'its measured error and a clear disclaimer.',
+        'its measured error and a clear disclaimer, and lets an evaluator predict any unseen day and compare with the actual value.',
+        'Measure every design change (data size, features, horizon, target) on validation data before keeping it.',
         'Document the methodology, results, limitations and the audit-driven improvements for examination.'])
 
     F.append(P('3. Project Scope', 'h1'))
@@ -319,7 +327,8 @@ def build_report():
         ['Training', 'src/training/train_models.py', 'Phase A (train → validation metrics, loss curves, importance) and phase B (refit on train+val)'],
         ['Evaluation', 'src/evaluation/backtesting.py, cross_validation.py, plots.py', 'Single test-set evaluation, model selection, results tables, figures'],
         ['Serving', 'src/inference/prediction.py, app/streamlit_app.py, src/api/app.py', 'Next-day forecast with context; dashboard; REST endpoints'],
-        ['Quality', 'tests/ (19 functions, 28 cases), .github/workflows/ci.yml, Dockerfile', 'Look-ahead, alignment, split, reconstruction, metrics, inference tests; CI; container'],
+        ['Experiments', 'src/experiments/run_experiments.py, before_after.py', 'E1 data size, E2 feature ablation, E3 horizon, E4 volatility (validation only); before/after on identical unseen days'],
+        ['Quality', 'tests/ (31 cases), .github/workflows/ci.yml, Dockerfile', 'Look-ahead, alignment, split/embargo, reconstruction, metrics, demo-inference tests; CI; container'],
     ], [2.6 * cm, 5.0 * cm, 8.8 * cm]))
     F.append(Paragraph('Table 1. Implemented components (source of truth: the repository).', S['caption']))
 
@@ -327,14 +336,15 @@ def build_report():
     F.append(P('5. Dataset and Data Processing', 'h1'))
     F.append(table([
         ['Series', 'Source / ticker', 'Rows used', 'Period', 'Role'],
-        ['Bitcoin OHLCV', 'Yahoo Finance, BTC-USD', '1,067 calendar days', '2023-08-27 → 2026-07-28', 'target + features'],
-        ['Gold futures OHLCV', 'Yahoo Finance, GC=F', '724 exchange days', '2023-09-11 → 2026-07-28', 'target + features'],
-        ['Silver futures OHLCV', 'Yahoo Finance, SI=F', '724 exchange days', '2023-09-11 → 2026-07-28', 'target + features'],
-        ['US Dollar Index, WTI crude, 10-y yield', 'Yahoo Finance: DX-Y.NYB, CL=F, ^TNX', 'aligned to asset calendar', '2023-08 → 2026-08', 'metals features'],
-        ['S&P 500, VIX', 'Yahoo Finance: ^GSPC, ^VIX', 'aligned', '2023-08 → 2026-08', 'all assets'],
-        ['Crypto Fear & Greed index', 'alternative.me API', 'aligned', '2023-04 → 2026-08', 'Bitcoin feature'],
+        ['Bitcoin OHLCV', 'Yahoo Finance, BTC-USD', '3,147 calendar days', '2018-01-31 → 2026-09-12', 'target + features'],
+        ['Gold futures OHLCV', 'Yahoo Finance, GC=F', '2,156 exchange days', '2018-02-15 → 2026-09-11', 'target + features'],
+        ['Silver futures OHLCV', 'Yahoo Finance, SI=F', '2,156 exchange days', '2018-02-15 → 2026-09-11', 'target + features'],
+        ['US Dollar Index, WTI crude, 10-y yield', 'Yahoo Finance: DX-Y.NYB, CL=F, ^TNX', 'aligned to asset calendar', '2018-01 → 2026-09', 'metals features'],
+        ['S&P 500, VIX', 'Yahoo Finance: ^GSPC, ^VIX', 'aligned', '2018-01 → 2026-09', 'all assets'],
+        ['Crypto Fear & Greed index', 'alternative.me API', 'aligned', '2018-02 → 2026-09', 'Bitcoin feature'],
     ], [3.4 * cm, 4.3 * cm, 3.0 * cm, 3.4 * cm, 2.3 * cm]))
-    F.append(Paragraph('Table 2. Data sources. Row counts are after indicator warm-up (30 rows). Raw downloads cover 2023-07-28 → 2026-07-28.', S['caption']))
+    F.append(Paragraph('Table 2. Data sources. Row counts are after indicator warm-up (30 rows). Raw downloads cover 2018-01-01 → 2026-09-12; '
+                       'the earlier 3-year download (2023-07 → 2026-07) is archived for the before/after comparison.', S['caption']))
     F.append(P('<b>Cleaning</b> (<font face="Mono">DataCleaner.clean_data</font>): duplicate timestamps removed; rows sorted; non-positive '
                'prices dropped. Bitcoin is re-indexed to every calendar day (no gaps were present). Gold and Silver <b>keep their exchange '
                'calendar</b> — the original pipeline forward-filled weekends, which created ~30 % synthetic zero-return rows. External '
@@ -362,13 +372,14 @@ def build_report():
                'changes (no look-ahead).'))
     F.append(table([
         ['Group', 'Features (formula)', 'Assets'],
-        ['Return path', 'log_return = ln(P_t/P_t−1); return_1d/2d/5d/10d = lagged returns; volatility_10d/30d = rolling std of returns', 'all'],
+        ['Return path', 'log_return = ln(P_t/P_t−1); return_1d/2d/5d/10d = lagged returns; return_20d = 20-day cumulative return', 'all'],
+        ['Volatility (rolling / HAR / EWMA)', 'volatility_10d/30d = rolling std; rv_1d/5d/22d = sqrt(mean r² over 1/5/22 days); ewma_vol = RiskMetrics σ (λ = 0.94)', 'all'],
         ['Momentum / trend', 'RSI(14); ADX(14); ROC(12); macd_norm = (EMA12−EMA26)/P; macd_hist_norm = (MACD−Signal9)/P; ema14_ratio, ema30_ratio = P/EMA−1', 'all'],
         ['Volatility state', 'bb_pctb = (P−BB_low)/(BB_up−BB_low); bb_width = (BB_up−BB_low)/BB_mid; atr_norm = ATR14/P; hl_range = (H−L)/P', 'all'],
         ['Macro', 'sp500_return, vix_return (all); dxy_return, oil_return, tnx_return (metals); gold_return (silver)', 'per asset'],
         ['Sentiment / calendar / activity', 'fear_greed (0–100); dow_sin, dow_cos; log_volume_change (clipped ±3)', 'Bitcoin'],
     ], [3.2 * cm, 10.9 * cm, 2.3 * cm]))
-    F.append(Paragraph('Table 4. Model input features: Bitcoin 24, Gold 23, Silver 24 (docs/FEATURES.md gives every formula and rationale).', S['caption']))
+    F.append(Paragraph('Table 4. Model input features: Bitcoin 29, Gold 28, Silver 29 (docs/FEATURES.md gives every formula and rationale). Groups added in the improvement phase are in the second row.', S['caption']))
     F.append(P('Deliberately excluded: futures volume for Gold/Silver (front-month contract volume from Yahoo jumps at contract rolls), '
                'day-of-week for the metals (no justification once synthetic weekends are removed), and redundant level indicators (VWAP, SMA, BB_Mid).'))
     F.append(P('<b>Target.</b> <i>y<sub>t</sub> = ln(P<sub>t+1</sub>/P<sub>t</sub>)</i>, the next row\'s log return, created only inside '
@@ -385,8 +396,8 @@ def build_report():
         ['Baseline', 'ARIMA(p,0,q)', 'return series', 'Order by AIC on train (BTC (1,0,0), Gold (2,0,2), Silver (3,0,2)); one-step walk-forward.'],
         ['Linear', 'Ridge', 'last-day features', 'L2-regularised regression; α tuned.'],
         ['Trees', 'Random Forest', 'last-day features', 'Depth-limited bagged trees.'],
-        ['Trees', 'LightGBM', 'last-day features', 'Gradient boosting, early-stopped on validation.'],
-        ['Trees', 'CatBoost', 'last-day features', 'Ordered boosting, early-stopped on validation. Served model.'],
+        ['Trees', 'LightGBM', 'last-day features', 'Gradient boosting, early-stopped on validation. Served for Gold and Silver.'],
+        ['Trees', 'CatBoost', 'last-day features', 'Ordered boosting, early-stopped on validation. Served for Bitcoin.'],
         ['Deep', 'GRU', '30×F window', 'One GRU layer (16/32 units) + dropout + dense; early stopping.'],
         ['Deep', 'LSTM', '30×F window', 'Same shape as the GRU for a fair comparison.'],
         ['Ensemble', 'Stacked', 'OOF predictions', 'Non-negative Ridge over Ridge/LightGBM/CatBoost/GRU (experiment).'],
@@ -396,32 +407,37 @@ def build_report():
                'the training window while monitoring validation loss to find the stopping point (phase A — this also yields honest '
                'validation metrics and loss curves), then refitted on train+validation with that stopping point fixed (phase B — the deployed '
                'model). The validation data is therefore never inside its own early-stopping monitor.'))
-    hp = [['Asset', 'Served model & tuned parameters', 'Stopping point', 'Runner-up configurations (tuned)']]
+    hp = [['Asset', 'Served model & tuned parameters', 'Stopping point', 'Other tuned configurations']]
+    bp = best['return_1d']
     for a in ASSETS:
-        p = best[a]['CatBoost']; fi = status[a]['fit_info']
-        hp.append([a, f"CatBoost: depth {p['depth']}, learning-rate {p['learning_rate']}, L2 {p['l2_leaf_reg']}, ≤{p['iterations']} iterations",
-                   f"{fi.get('iterations_used')} iterations",
-                   f"LightGBM: {best[a]['LightGBM']['num_leaves']} leaves, lr {best[a]['LightGBM']['learning_rate']}, λ {best[a]['LightGBM']['reg_lambda']}; "
-                   f"Ridge α {best[a]['Ridge']['alpha']}; RF depth {best[a]['RandomForest']['max_depth']}; "
-                   f"GRU {best[a]['GRU']['units']}u/drop {best[a]['GRU']['dropout']}; LSTM {best[a]['LSTM']['units']}u"])
+        m = status[a]['primary_model']; p = bp[a][m]; fi = status[a]['fit_info']
+        desc = (f"CatBoost: depth {p['depth']}, lr {p['learning_rate']}, L2 {p['l2_leaf_reg']}" if m == 'CatBoost'
+                else f"LightGBM: {p['num_leaves']} leaves, lr {p['learning_rate']}, min-leaf {p['min_child_samples']}, λ {p['reg_lambda']}")
+        stop = f"{fi.get('iterations_used', fi.get('n_estimators_used', '—'))} rounds"
+        hp.append([a, desc, stop,
+                   f"Ridge α {bp[a]['Ridge']['alpha']}; RF depth {bp[a]['RandomForest']['max_depth']}; "
+                   f"{'LightGBM ' + str(bp[a]['LightGBM']['num_leaves']) + ' leaves' if m != 'LightGBM' else 'CatBoost depth ' + str(bp[a]['CatBoost']['depth'])}; "
+                   f"GRU {bp[a]['GRU']['units']}u/drop {bp[a]['GRU']['dropout']}; LSTM {bp[a]['LSTM']['units']}u/drop {bp[a]['LSTM']['dropout']}"])
     F.append(table(hp, [1.7 * cm, 5.3 * cm, 2.2 * cm, 7.2 * cm]))
-    F.append(Paragraph('Table 6. Hyper-parameters chosen by walk-forward validation (results/tuning/best_params.json). The search consistently '
-                       'selected the most regularised settings — shallow trees, few iterations, large α — i.e. the data supports very little model capacity.', S['caption']))
-    F.append(P('<b>Why CatBoost is served.</b> Selection is automatic: the model with the lowest mean walk-forward RMSE of the return on the '
-               'train+val folds. CatBoost won for all three assets, but Ridge, LightGBM and the historical mean are within 0.5 % of it and '
-               'the random walk within 1 % — the ranking among these is not statistically meaningful. CatBoost was retained because it is '
-               'the validation winner, trains in seconds, and exposes feature importance; the recurrent models were the worst family on '
-               'every asset in validation.'))
+    F.append(Paragraph('Table 6. Hyper-parameters chosen by walk-forward validation (results/tuning/best_params.json). All tuned configurations '
+                       'of a model lie within 0.3–2 % of each other while the fold-to-fold standard deviation is ≈ 20 % of the mean, and early '
+                       'stopping selected 10–50 boosting rounds: the data supports very little capacity.', S['caption']))
+    F.append(P('<b>Why gradient-boosted trees are served.</b> Selection is automatic: the model with the lowest mean walk-forward RMSE of '
+               'the return on the train+val folds — CatBoost for Bitcoin, LightGBM for Gold and Silver. All nine models lie within 0.3 % of '
+               'each other and of the random walk on validation, so the ranking is not statistically decisive; boosted trees are retained '
+               'because they are the validation winners, train in seconds and expose feature importance, while the recurrent models are the '
+               'weakest family on every asset even with 2,750 training windows.'))
 
     # ---- 8 training & evaluation
     F.append(P('8. Training and Evaluation Methodology', 'h1'))
     F.append(table([
         ['Split', 'Rule', 'Bitcoin', 'Gold / Silver', 'Used for'],
-        ['Train', f'≤ {TRAIN_END}', '746 days (716 windows)', '504 days (474 windows)', 'fitting; scaler'],
-        ['Validation', f'{TRAIN_END} < t ≤ {VAL_END}', '160 days', '109 days', 'early stopping; walk-forward folds with train'],
-        ['Test', f'> {VAL_END} (to 2026-07-28)', '161 days', '111 days', 'evaluated once by backtesting.py'],
+        ['Train', f'target ≤ {TRAIN_END}', '2,750 windows (from 2018-03)', '1,874 windows (from 2018-03)', 'fitting; scaler'],
+        ['Validation', f'{TRAIN_END} < target ≤ {VAL_END}', '160 days', '109 days', 'early stopping; walk-forward folds with train'],
+        ['Test', f'target > {VAL_END} (to 2026-09-12)', '207 days', '143 days', 'evaluated once by backtesting.py'],
     ], [2.0 * cm, 4.2 * cm, 3.4 * cm, 3.4 * cm, 3.4 * cm]))
-    F.append(Paragraph('Table 7. Frozen chronological split (config.py). No shuffling; identical calendar boundaries for all assets.', S['caption']))
+    F.append(Paragraph('Table 7. Frozen chronological split (config.py), defined by the dates the target covers (exact embargo for multi-day targets). '
+                       'No shuffling; identical calendar boundaries for all assets.', S['caption']))
     F.append(P(f'<b>Walk-forward validation.</b> The train+validation period is cut into {CV_FOLDS} consecutive validation blocks; for fold '
                '<i>k</i> the model is trained on everything before the block and scored on the block (expanding window). Inside each fold '
                'the last 15 % of the fold\'s training window is the early-stopping monitor. Hyper-parameter grids (over regularisation '
@@ -449,12 +465,14 @@ def build_report():
         ['Synthetic rows', 'exchange calendar for futures', 'test_commodities_keep_trading_calendar'],
         ['Wrong price reconstruction', 'explicit previous close', 'test_true_target_reconstructs_actual_close_exactly (error 1e-11)'],
         ['Test set touched more than once', 'single script', 'backtesting.py is the only reader of the test split'],
+        ['Multi-day target straddling a split', 'split by target dates', 'test_task_targets_are_future_only_and_embargoed'],
+        ['Demo prediction seeing future rows', 'features.loc[:as_of] before scaling', 'test_predict_for_date_uses_only_past_data_and_reveals_actual'],
     ], [4.2 * cm, 5.0 * cm, 7.2 * cm]))
-    F.append(Paragraph('Table 9. Data-leakage checklist enforced by the test suite (tests/, 28 cases, all passing).', S['caption']))
+    F.append(Paragraph('Table 9. Data-leakage checklist enforced by the test suite (tests/, 31 cases, all passing).', S['caption']))
 
     # ---- 9 results
     F.append(P('9. Experimental Results', 'h1'))
-    F.append(P('Test period 2026-02-18 → 2026-07-28 for all assets (Bitcoin 161 days; Gold and Silver 111 exchange days). '
+    F.append(P('Test period 2026-02-18 → 2026-09-12 for all assets (Bitcoin 207 days; Gold and Silver 143 exchange days). '
                '"CV" columns are the walk-forward validation scores used for selection; the remaining columns are the single test-set '
                'evaluation. The served model is marked "(served)". All values are from results/cv_results.csv and results/final_test_results.csv.'))
     for i, a in enumerate(ASSETS):
@@ -464,49 +482,96 @@ def build_report():
                  'Figure 4. Test-set comparison: RMSE of the next-day return (red line = random walk) and directional accuracy (red line = 50 %).'))
     F.append(P('9.4 Interpretation', 'h2'))
     F += bullets([
-        '<b>Baselines.</b> The random walk is the best or joint-best forecast on every asset in both validation and test; the historical mean '
-        'is within 0.2 % of it. ARIMA is significantly worse than the random walk on Gold and Silver (DM p = 0.03, 0.01): the small '
-        'in-sample autocorrelations it fits do not persist.',
-        '<b>Served models.</b> CatBoost\'s test return-RMSE is 0.3 % (Bitcoin), 1.5 % (Gold) and 0.6 % (Silver) above the random walk — '
-        'inside the noise (DM p = 0.57 / 0.15 / 0.27). Its predictions have a standard deviation of 0.0001–0.0003 against a true return '
-        'standard deviation of 0.017–0.034: the validation-selected model is effectively the unconditional drift.',
-        '<b>Direction.</b> Directional accuracy is 42–53 % for every model on every asset and none is significant (smallest binomial '
-        'p = 0.26: Random Forest on Bitcoin, 52.8 % of 161 days). Random Forest on Bitcoin also has the best test R² (+0.007) and the only '
-        'positive strategy return (+3.1 % vs −6.1 % buy-and-hold), but it ranked 7th of 9 on validation; reporting it as the winner would '
-        'be selection on the test set.',
-        '<b>Deep models.</b> GRU and LSTM are the worst family in validation on every asset (R² −0.10 to −0.22) and significantly worse than '
-        'the random walk on the Bitcoin test set (DM p = 0.01, 0.03), despite being reduced to a single 16–32-unit layer with dropout and '
-        'early stopping. With 500–700 training windows they fit noise.',
-        f'<b>Stacked ensemble.</b> With non-negative weights on out-of-fold predictions the meta-model assigned weight 0.0 to all four base '
-        f'models for Bitcoin (intercept only) and only 0.04–0.16 for Gold and Silver — an independent confirmation that the base models carry '
-        'no combinable out-of-sample signal.',
-        '<b>Over-fitting.</b> Validation RMSE is 1.0× (Bitcoin), 2.0× (Gold) and 3.0× (Silver) the training RMSE, but the random walk shows '
-        'exactly the same ratios (Figure 6): the gap is regime shift — the validation and test windows are far more volatile than the '
-        'training window — not memorisation.'])
-    F.append(fig(os.path.join(FIGURES_DIR, 'gold_actual_vs_predicted.png'), 15.2,
-                 'Figure 5. Gold test period, served model: predicted vs actual next-day returns (top, scatter middle) and the price view (bottom). '
+        '<b>Bitcoin and Gold.</b> Every model is within ±0.5 % of the random walk\'s return-RMSE; no Diebold–Mariano test is significant '
+        '(served models p = 0.74 and 0.42); directional accuracy 47–51 %. The tuned models are close to the unconditional drift.',
+        '<b>Silver.</b> The served LightGBM has R² = +0.044 in return space, 62.2 % directional accuracy on 143 days (binomial p = 0.002) and '
+        'a significantly lower squared error than the random walk (DM p = 0.002); the stacked ensemble reproduces it. The regime table below '
+        'shows the edge in every volatility and trend slice of the window. Its walk-forward figure was 52.8 %, so the window is unusually '
+        'favourable and the result is reported as period-specific.',
+        '<b>Deep models.</b> GRU and LSTM are the weakest family on every asset in validation and not better than the random walk in test '
+        '(early stopping after 1–12 epochs), even with 3× the earlier data.',
+        '<b>Stacked ensemble.</b> With 3 years of data the non-negative meta-weights collapsed to zero; with the full history they are '
+        f'non-zero (Bitcoin: LightGBM {stack["Bitcoin"]["weights"]["LightGBM"]:.2f}, CatBoost {stack["Bitcoin"]["weights"]["CatBoost"]:.2f}; '
+        f'Silver: LightGBM {stack["Silver"]["weights"]["LightGBM"]:.2f}, CatBoost {stack["Silver"]["weights"]["CatBoost"]:.2f}, GRU {stack["Silver"]["weights"]["GRU"]:.2f}) '
+        'and the stack matches the best single model on test — the base models now carry combinable out-of-sample signal.',
+        '<b>Over-fitting.</b> Validation RMSE is 0.8× (Bitcoin), 2.1× (Gold) and 3.0× (Silver) the training RMSE — and the random walk shows '
+        'the same ratios (Figure 6): the gap is regime shift, not memorisation.'])
+
+    # ---- regime table
+    F.append(P('9.5 Performance across market regimes (test period, served model vs naive)', 'h2'))
+    rg = [['Asset', 'Regime', 'Days', 'MAE % served', 'MAE % naive', 'Direction hits %']]
+    for a in ASSETS:
+        for _, r in REG[(REG.asset == a) & (REG.regime_type != 'day_regime')].iterrows():
+            rg.append([a, r['regime'], int(r['n_days']), f"{r['mae_pct_served']:.2f}", f"{r['mae_pct_naive']:.2f}", f"{r['dir_hit_served_pct']:.1f}"])
+    t = table(rg, [1.8 * cm, 4.2 * cm, 1.4 * cm, 2.8 * cm, 2.8 * cm, 3.4 * cm], font=7.8)
+    t.setStyle(TableStyle([('ALIGN', (2, 1), (-1, -1), 'RIGHT')]))
+    F.append(t)
+    F.append(Paragraph('Table 13. Regimes are defined on the day the prediction is made (30-day volatility tercile; sign of the 20-day return). '
+                       'Errors scale with volatility for every asset; Silver\'s advantage holds in every slice (results/regime_analysis.csv).', S['caption']))
+
+    # ---- before / after
+    F.append(P('9.6 Before vs after the improvement phase (identical unseen days 2026-02-18 → 2026-07-28)', 'h2'))
+    F.append(P('The archived 3-year system and the improved system are compared on exactly the same days. Yahoo Finance revised a few '
+               'historical closes between the two downloads (mean &lt; 0.005 %, max 0.75 % on one Bitcoin day), so each system is also shown '
+               'against the naive forecast computed on its own data (results/experiments/before_after.csv).'))
+    ba = [['Asset', 'System', 'Model', 'MAE ($)', 'RMSE ($)', 'MAPE %', 'RMSE (ret)', 'R² (ret)', 'Dir. acc. % (p)', 'DM p']]
+    for a in ASSETS:
+        for lab in ('before (3 y data)', 'after (full history)', 'naive (new data)'):
+            r = BA[(BA.asset == a) & (BA.system == lab)].iloc[0]
+            da = '—' if r['model'] == 'Naive' else f"{r['DirAcc_pct']:.1f} ({r['DirAcc_pvalue']:.2f})"
+            dm = '—' if r['model'] == 'Naive' else f"{r['DM_pvalue_vs_naive']:.2f}"
+            ba.append([a, lab, r['model'], f"{r['MAE_usd']:,.2f}", f"{r['RMSE_usd']:,.2f}", f"{r['MAPE_usd']:.2f}", f"{r['RMSE_ret']:.5f}",
+                       f"{r['R2_ret']:+.3f}", da, dm])
+    t = table(ba, [1.6 * cm, 3.0 * cm, 1.9 * cm, 1.6 * cm, 1.7 * cm, 1.3 * cm, 1.7 * cm, 1.4 * cm, 1.9 * cm, 1.1 * cm], font=7.4)
+    t.setStyle(TableStyle([('ALIGN', (3, 1), (-1, -1), 'RIGHT')]))
+    F.append(t)
+    F.append(Paragraph('Table 14. Gold −1.9 % and Silver −2.8 % return-RMSE; Silver moves from worse-than-naive to significantly better; Bitcoin unchanged within noise.', S['caption']))
+
+    # ---- design experiments
+    F.append(P('9.7 Design experiments (validation only)', 'h2'))
+    e1 = EXP['E1']; e3 = EXP['E3']; e4 = EXP['E4']; e2 = EXP['E2']
+    def e1row(a, m):
+        x = e1[(e1.asset == a) & (e1.model == m)]; return x.iloc[0]['val_RMSE_ret'], x.iloc[1]['val_RMSE_ret']
+    F += bullets([
+        '<b>E1 data size</b> (same features and parameters, fixed validation window 2025-09 → 2026-02): training on 2018 → instead of 2023 → '
+        + '; '.join(f"{a} CatBoost {(e1row(a, 'CatBoost')[1] / e1row(a, 'CatBoost')[0] - 1) * 100:+.1f} %" for a in ASSETS)
+        + ' validation RMSE — Bitcoin benefits, the metals are neutral; kept because it also stabilises tuning.',
+        '<b>E2 feature-group ablation</b> (walk-forward CV, Ridge and LightGBM): dropping any one of the five groups changes RMSE by '
+        f"{e2[e2.dropped_group != '(none — all features)']['delta_RMSE_pct'].min():+.2f} % … {e2[e2.dropped_group != '(none — all features)']['delta_RMSE_pct'].max():+.2f} % — inside noise; "
+        'the full set is kept for interpretability.',
+        '<b>E3 horizon</b>: a 5-day return target is not more predictable than the next day (best model '
+        f"{e3[(e3.task == 'return_5d') & (e3.model != 'Naive')]['RMSE_vs_naive_pct'].min():+.2f} % vs naive); the served horizon stays 1 day.",
+        '<b>E4 volatility</b>: 22-day realised volatility is more predictable than the return (Bitcoin Ridge '
+        f"{e4[(e4.asset == 'Bitcoin') & (e4.model == 'Ridge')]['RMSE_vs_persistence_pct'].iloc[0]:+.1f} % vs persistence) but only marginally better than a RiskMetrics EWMA "
+        f"({e4[(e4.asset == 'Bitcoin') & (e4.model == 'EWMA')]['RMSE_vs_persistence_pct'].iloc[0]:+.1f} %) and worse than EWMA for Silver — documented, not productised."])
+    F.append(fig(os.path.join(FIGURES_DIR, 'silver_actual_vs_predicted.png'), 15.2,
+                 'Figure 5. Silver test period, served LightGBM: predicted vs actual next-day returns (top, scatter middle) and the price view (bottom). '
                  'A price line always tracks the actual with a one-day lag; skill is only visible in return space.', max_height_cm=12.5))
     F.append(fig(os.path.join(FIGURES_DIR, 'overfitting_gap.png'), 15.0,
                  'Figure 6. Train vs validation RMSE per model with the random walk\'s train/validation levels (dotted/dashed).'))
-    F.append(fig(os.path.join(FIGURES_DIR, 'btc_feature_importance.png'), 10.5,
-                 'Figure 7. Bitcoin, served CatBoost: normalised gain importance. Volatility-regime and trend-distance features dominate, '
-                 'together with the Fear & Greed index.'))
+    F.append(fig(os.path.join(FIGURES_DIR, 'silver_feature_importance.png'), 10.5,
+                 'Figure 7. Silver, served LightGBM: normalised gain importance.'))
 
     # ---- 10 application
     F.append(P('10. Final System and Application', 'h1'))
     F.append(P('The Streamlit dashboard (<font face="Mono">make serve</font>, port 8501) and the FastAPI service '
-               '(<font face="Mono">make api</font>, port 8000) sit on the same inference module. Inference scales the latest unscaled '
-               'features with the train-fitted scaler, runs the requested model on the last 30 rows, unscales the predicted return and '
-               'converts it to a price. A "Sync Live Market Data" button refreshes features into a separate live file so the frozen '
-               'evaluation data is never overwritten (Yahoo Finance rate-limited during this work, so the stored data is shown).'))
+               '(<font face="Mono">make api</font>, port 8000) sit on the same inference module. Inference scales the features up to the '
+               'chosen day with the train-fitted scaler, runs the requested model on the last 30 rows, un-standardises the predicted return and '
+               'converts it to a price. The <i>Predict a Day</i> tab is the demonstration: stand on any day of the unseen test period, generate '
+               'the next-day forecast from data up to that day only, then reveal the actual close, the error in dollars and percent, and the '
+               'direction hit — highlighted on the actual-vs-predicted chart, with every other model\'s forecast for the same day. The '
+               '<i>Prediction History</i> tab lists every unseen day with predicted, actual, error and hit/miss, plus MAE and hit-rate KPIs. '
+               'A "Sync Live Market Data" button refreshes features into a separate live file so the frozen evaluation data is never overwritten.'))
     F.append(table([
         ['Implemented (verified running)', 'Not implemented (future possibilities)'],
         ['• Select Bitcoin / Gold / Silver; price chart with train/val/test shading; Bollinger, RSI, MACD, volume overlays<br/>'
+         '• <b>Predict a Day (unseen test)</b>: choose any test day → predicted close, actual close, error $ and %, direction hit/miss, chart highlight, all models on that day<br/>'
+         '• <b>Prediction History</b>: every unseen day with predicted / actual / error / hit, MAE and hit-rate KPIs, CSV download<br/>'
          '• Run a next-day prediction with the served model or any trained model: current close, predicted close, % change, direction, '
          'horizon (T+1), model name, ±1 RMSE uncertainty band, held-out metrics of that model, disclaimer<br/>'
          '• Forecast-horizon chart (last 60 days + next day); table of all trained models\' predictions on the same input<br/>'
          '• Validation view: actual vs predicted returns and prices over the test period; return scatter<br/>'
-         '• Performance tab: walk-forward and test tables for all models, honest-reading summary, report figures<br/>'
+         '• Performance tab: walk-forward and test tables, honest-reading summary, regime table, experiment tables (E1–E4), report figures<br/>'
          '• Methodology tab: task, split, features, models, served-model parameters, model inventory<br/>'
          '• API: GET /health, GET /models, GET /predict/{asset}[?model=…]; Docker Compose for both services<br/>'
          '• Deep links: ?asset=Gold&amp;run=1',
@@ -514,12 +579,15 @@ def build_report():
          '• User accounts, saved forecasts, database<br/>• Automatic scheduled retraining in production<br/>'
          '• News / NLP sentiment for the metals<br/>• Intraday data<br/>• Trading execution or portfolio management'],
     ], [10.8 * cm, 5.6 * cm]))
-    F.append(Paragraph('Table 13. Application functionality.', S['caption']))
-    F.append(fig(os.path.join(DOC_FIG, 'dash_gold_forecast.png'), 14.0,
-                 'Figure 8. Dashboard, Gold: indicator chart, next-day prediction with uncertainty band, held-out metrics, disclaimer, '
-                 'forecast-horizon chart and multi-model table (screenshot of the running application).', max_height_cm=20.5))
+    F.append(Paragraph('Table 15. Application functionality.', S['caption']))
+    demo_crop = crop_image(os.path.join(DOC_FIG, 'dash_demo_silver.png'), os.path.join(DOC_FIG, 'dash_demo_silver_crop.png'), (0, 0, 2100, 2150))
+    F.append(fig(demo_crop, 15.0, 'Figure 8. Dashboard, Silver — Predict a Day: the model stands on 2026-09-10, predicts $64.46 for 2026-09-11 '
+                 'from data up to that day, the actual close ($64.55) is revealed, error −0.15 %, direction hit; all models on the same day below '
+                 '(screenshot of the running application).', max_height_cm=16.0))
+    hist_crop = crop_image(os.path.join(DOC_FIG, 'dash_history_silver.png'), os.path.join(DOC_FIG, 'dash_history_silver_crop.png'), (0, 0, 2100, 1500))
+    F.append(fig(hist_crop, 15.0, 'Figure 9. Dashboard, Silver — Prediction History: every unseen day with predicted, actual, error and hit/miss; MAE and hit-rate KPIs.', max_height_cm=11.5))
     perf_crop = crop_image(os.path.join(DOC_FIG, 'dash_performance.png'), os.path.join(DOC_FIG, 'dash_performance_crop.png'), (0, 0, 2100, 1700))
-    F.append(fig(perf_crop, 16.0, 'Figure 9. Dashboard, Bitcoin: Model Performance tab with the walk-forward and test tables generated by the evaluation script.'))
+    F.append(fig(perf_crop, 15.0, 'Figure 10. Dashboard — Model Performance tab with the walk-forward and test tables generated by the evaluation script.', max_height_cm=12.5))
 
     # ---- 11 improvements
     F.append(P('11. Improvements Made During the Audit', 'h1'))
@@ -535,29 +603,30 @@ def build_report():
         ['Model', 'Served "stacked ensemble" had coefficients ≈ 0 (Bitcoin exactly [0,0,0]) — a constant predictor, never evaluated on test; 2×100-unit GRU/LSTM over-fitted', 'Uniform registry of 10 models; validation-based selection; small tunable GRU/LSTM; stack kept as a reported experiment'],
         ['Evaluation', 'R² ≈ 0.94–0.97 on price levels presented as skill; naive baseline beat every model but was not acknowledged; directional accuracy mis-computed (naive 0 %)', 'Return-space metrics; correct directional accuracy with p-values; Diebold–Mariano test; strategy backtest; over-fitting gap; honest reporting'],
         ['Serving', 'CLI/API crashed (LightGBM given 900 features; float(dict)); dashboard listed stale LSTM and a non-existent Ensemble path', 'Rewritten inference, API and dashboard around the served model with context and disclaimer; verified in the browser'],
-        ['Code & docs', 'Five stale result files from an earlier pipeline; Makefile/CI referenced missing scripts; 4 of 31 tests failed; README claimed models/indicators that did not exist', 'Single results/ tree; working Makefile/CI/retrain; 28 passing tests; accurate README and docs/; bit-identical reproducibility'],
+        ['Code & docs', 'Five stale result files from an earlier pipeline; Makefile/CI referenced missing scripts; 4 of 31 tests failed; README claimed models/indicators that did not exist', 'Single results/ tree; working Makefile/CI/retrain; 31 passing tests; accurate README and docs/; bit-identical reproducibility'],
+        ['Improvement phase', '3 years of data; no measured design decisions; forecast shown without a way to verify it', '2018 → data (2.9×); HAR/EWMA volatility and momentum features; per-task tuning; logged experiments E1–E4; before/after on identical days; Predict-a-Day demo and prediction history'],
     ], [2.6 * cm, 7.4 * cm, 6.4 * cm], font=7.8))
-    F.append(Paragraph('Table 14. Before vs final implementation (docs/FIX_PLAN.md, docs/AUDIT_SUMMARY.md).', S['caption']))
+    F.append(Paragraph('Table 16. Before vs final implementation (docs/FIX_PLAN.md, docs/AUDIT_SUMMARY.md, docs/RESULTS.md §2–3).', S['caption']))
 
     # ---- 12 limitations
     F.append(P('12. Limitations', 'h1'))
     F += bullets([
         '<b>Market efficiency dominates.</b> Lag-1 autocorrelation of returns is −0.08 / −0.04 / +0.00 (BTC / Gold / Silver); at a one-day '
         'horizon the predictable component is small and unstable, and the results are consistent with that.',
-        '<b>Small sample.</b> Three years of daily data (Yahoo Finance rate-limited a longer download; config.DATA_START_DATE = 2018-01-01 is '
-        'supported by the pipeline). With 111–161 test days, differences of a few percent in RMSE and directional accuracies of 52–56 % are not '
-        'statistically detectable.',
-        '<b>Regime shift in the test window.</b> Gold and Silver traded far above their training range and Silver\'s 30-day volatility exceeded '
-        'every training value on 89 % of test days; one five-month window is a single draw from a non-stationary process.',
+        '<b>One test window.</b> 8.6 years of training data removed the worst of the small-sample problem, but the unseen window is still a '
+        'single 5–7-month period (143–207 days): a few percent in RMSE and directional accuracies of 52–56 % are not statistically detectable, '
+        'and Silver\'s significant result may not persist (its walk-forward figure is 52.8 %).',
+        '<b>Regime shift in the test window.</b> The 2026 window is far more volatile than the 2018–2025 average (validation RMSE 2–3× training for '
+        'the metals, for the random walk as well as for the models); one window is a single draw from a non-stationary process.',
         '<b>Data quality.</b> Front-month futures (roll effects; unusable volume), a composite BTC index, forward-filled macro series on holidays, '
-        'and a proprietary sentiment index.',
+        'a proprietary sentiment index, and vendor revisions of historical closes between downloads (max 0.75 %).',
         '<b>Modelling.</b> One-day point forecasts only; the dashboard\'s band is an ex-post RMSE band, not a calibrated interval; small tuning '
         'grids; selection by RMSE (directional accuracy and Sharpe are reported but not optimised).',
         '<b>Backtest.</b> The long/flat strategy uses a flat 10 bps cost with no slippage, shorting, sizing or financing.'])
 
     F.append(P('13. Future Work', 'h1'))
     F += bullets([
-        'Download the full history from 2018 (≈ 3× more data) and re-run the unchanged pipeline.',
+        'Roll the test window forward as new months arrive and re-check whether Silver\'s edge persists (walk-forward re-evaluation).',
         'Forecast volatility (GARCH-type or quantile targets), where the volatility-regime features clearly carry information, and score calibration.',
         'Multi-day horizons and probabilistic forecasts; regime-aware or switching models.',
         'News/NLP sentiment for the metals; intraday data; a realistic transaction-cost model.'])
@@ -565,29 +634,31 @@ def build_report():
     F.append(KeepTogether([P('14. Conclusion', 'h1'), P('The project set out to build a working next-day prediction system for Bitcoin, Gold and Silver and to make it '
                'scientifically defensible. The final system has a leakage-audited, reproducible pipeline; ten model families compared '
                'under expanding-window walk-forward validation on identical days; a single, statistically tested evaluation on an untouched '
-               'period; and a dashboard and API that serve the validation-selected model together with its measured error. The empirical '
-               'answer is a validated negative result: with daily price, volume, macro and sentiment features and ~700–1,000 observations, '
-               'no statistical, tree-based or recurrent model beats the random walk at a one-day horizon by a significant margin, and the '
-               'models that deviate most from the drift are significantly worse. The value of the work lies in demonstrating that result '
-               'rigorously — and in showing why the original "R² ≈ 0.95" was an illusion — rather than in a forecasting edge.')]))
+               'period; an evaluator-facing demonstration that predicts any unseen day and reveals the actual value and the error; and a '
+               'dashboard and API that serve the validation-selected model together with its measured error. The empirical answer with 8.6 '
+               'years of data is mixed and honest: for Bitcoin and Gold no statistical, tree-based or recurrent model beats the random walk at '
+               'a one-day horizon by a significant margin; for Silver the served LightGBM does on the 2026 test window (62 % direction, '
+               'DM p = 0.002) with a documented caveat. The measured improvements over the 3-year system (1.9–2.8 % RMSE on the metals) came '
+               'from data volume, not model complexity. The value of the work lies in the rigour of the evaluation — and in showing why the '
+               'original "R² ≈ 0.95" was an illusion — rather than in a claimed forecasting edge.')]))
 
     F.append(P('15. FYP Readiness Assessment', 'h1'))
     F.append(P('<b>Suitable for submission and live demonstration.</b> The implementation demonstrates the complete ML research workflow '
                '(problem → data → analysis → features → baselines → models → validation → experiments → comparison → final model → '
                'system → evaluation → limitations); every methodological claim is backed by a test, a script or a results file; the '
-               'application runs for all three assets; and the pipeline reproduces every reported number. The main remaining weaknesses are '
-               'the data volume and the absence of a positive forecasting result — the former is addressable by re-downloading data, the '
-               'latter is the honest finding of the study and is presented as such. It should be presented as a methodological benchmark and '
-               'decision-support prototype, not as a market-beating predictor.', 'box'))
+               'application runs for all three assets with an interactive unseen-day demonstration; every design change was measured before '
+               'being kept; and the pipeline reproduces every reported number. The remaining weakness is the single test window, which is '
+               'stated in the limitations. It should be presented as a methodological benchmark and decision-support prototype with one '
+               'period-specific positive result, not as a market-beating predictor.', 'box'))
 
     F.append(P('Appendix — Reproduction', 'h1'))
     F.append(P('python -m venv venv &amp;&amp; source venv/bin/activate &amp;&amp; pip install -r requirements.txt<br/>'
-               'make preprocess eda tune train stack evaluate figures test   # full pipeline from data/raw<br/>'
+               'make preprocess eda tune train stack evaluate figures experiments test   # full pipeline from data/raw<br/>'
                'make serve   # dashboard on http://localhost:8501<br/>'
                'make api     # FastAPI on http://localhost:8000/docs<br/>'
                'python docs/build_report.py   # regenerate this report from results/', 'code'))
-    F.append(P('Repository documents: docs/METHODOLOGY.md, docs/FEATURES.md, docs/RESULTS.md, docs/LIMITATIONS.md, docs/VIVA_QA.md, '
-               'docs/REPORT_STRUCTURE.md, docs/FIX_PLAN.md, docs/AUDIT_SUMMARY.md, results/FINAL_RESULTS.md.', 'small'))
+    F.append(P('Repository documents: docs/METHODOLOGY.md, docs/FEATURES.md, docs/RESULTS.md, docs/LIMITATIONS.md, docs/VIVA_QA.md, docs/DEMO_GUIDE.md, '
+               'docs/REPORT_STRUCTURE.md, docs/FIX_PLAN.md, docs/AUDIT_SUMMARY.md, results/FINAL_RESULTS.md, results/experiments/experiments_summary.md.', 'small'))
 
     doc.build(F, canvasmaker=NumberedCanvas)
     print('wrote', OUT_REPORT)
@@ -607,36 +678,39 @@ def build_summary():
         ['Item', 'Final implementation'],
         ['Assets / horizon', 'Bitcoin, Gold (GC=F), Silver (SI=F); next trading day'],
         ['Target', 'log return ln(P_t+1 / P_t); price = P_t · exp(ŷ)'],
-        ['Data', 'Yahoo Finance daily OHLCV 2023-07-28 → 2026-07-28 (BTC 1,067 / metals 724 usable days) + DXY, WTI, 10-y yield, S&P 500, VIX, Fear & Greed'],
-        ['Features', '24 (BTC) / 23 (Gold) / 24 (Silver) stationary, backward-looking features; raw price levels never used as inputs'],
-        ['Split', f'train ≤ {TRAIN_END} · validation ≤ {VAL_END} · test 2026-02-18 → 2026-07-28 (161 / 111 / 111 days), chronological, evaluated once'],
+        ['Data', 'Yahoo Finance daily OHLCV 2018-01-01 → 2026-09-12 (BTC 3,147 / metals 2,156 usable days) + DXY, WTI, 10-y yield, S&P 500, VIX, Fear & Greed'],
+        ['Features', '29 (BTC) / 28 (Gold) / 29 (Silver) stationary, backward-looking features incl. HAR/EWMA volatility and momentum; raw price levels never used as inputs'],
+        ['Split', f'train ≤ {TRAIN_END} · validation ≤ {VAL_END} · unseen test 2026-02-18 → 2026-09-12 (207 / 143 / 143 days), chronological, evaluated once'],
         ['Validation', f'{CV_FOLDS}-fold expanding-window walk-forward on train+val for tuning and model selection'],
         ['Models', 'Naive random walk, historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM, stacked ensemble'],
-        ['Served model', 'CatBoost (validation winner for all three assets; depth 3/5/3, lr 0.01)'],
+        ['Served model', 'CatBoost for Bitcoin, LightGBM for Gold and Silver (walk-forward validation winners; early-stopped after 10–50 rounds)'],
         ['Metrics', 'MAE/RMSE/MAPE ($), RMSE/MAE/R² (return), directional accuracy + binomial p, Diebold–Mariano vs random walk, strategy backtest'],
-        ['Stack', 'Python 3.9, pandas, scikit-learn, LightGBM, CatBoost, TensorFlow/Keras, statsmodels, Streamlit, FastAPI, Docker, pytest (28 cases), GitHub Actions'],
+        ['Stack', 'Python 3.9, pandas, scikit-learn, LightGBM, CatBoost, TensorFlow/Keras, statsmodels, Streamlit, FastAPI, Docker, pytest (31 cases), GitHub Actions'],
+        ['Demo', 'Predict-a-Day on the unseen test period (predicted vs actual vs error), prediction history, live forecast with uncertainty band'],
     ], [3.0 * cm, 13.4 * cm]))
     F.append(P('Headline test-set results', 'h2'))
     d = [['Asset', 'Model', 'MAE ($)', 'RMSE ($)', 'MAPE %', 'R² (return)', 'Dir. acc. % (p)', 'DM p vs naive']]
     for a in ASSETS:
-        for m in ('Naive-Zero', 'CatBoost'):
+        for m in ('Naive', status[a]['primary_model']):
             r = row(a, m)
-            d.append([a, NICE.get(m, m) + (' (served)' if m == 'CatBoost' else ''), f"{r['MAE_usd']:,.2f}", f"{r['RMSE_usd']:,.2f}", f"{r['MAPE_usd']:.2f}",
-                      f"{r['R2_ret']:+.3f}", '—' if m == 'Naive-Zero' else f"{r['DirAcc_pct']:.1f} ({r['DirAcc_pvalue']:.2f})",
-                      '—' if m == 'Naive-Zero' else f"{r['DM_pvalue']:.2f}"])
+            d.append([a, NICE.get(m, m) + (' (served)' if m != 'Naive' else ''), f"{r['MAE_usd']:,.2f}", f"{r['RMSE_usd']:,.2f}", f"{r['MAPE_usd']:.2f}",
+                      f"{r['R2_ret']:+.3f}", '—' if m == 'Naive' else f"{r['DirAcc_pct']:.1f} ({r['DirAcc_pvalue']:.2f})",
+                      '—' if m == 'Naive' else f"{r['DM_pvalue']:.2f}"])
     t = table(d, [1.7 * cm, 3.6 * cm, 1.8 * cm, 1.9 * cm, 1.6 * cm, 2.0 * cm, 2.6 * cm, 2.2 * cm])
     t.setStyle(TableStyle([('ALIGN', (2, 1), (-1, -1), 'RIGHT')]))
     F.append(t)
-    F.append(Paragraph('Test period 2026-02-18 → 2026-07-28. Full 10-model tables: results/FINAL_RESULTS.md and the main report.', S['caption']))
+    F.append(Paragraph('Unseen test period 2026-02-18 → 2026-09-12. Full 10-model tables: results/FINAL_RESULTS.md and the main report.', S['caption']))
     F.append(P('Reading the numbers', 'h2'))
-    F.append(P('R² is reported on returns, where 0 means "as good as predicting the mean"; every model is within a few thousandths of 0 or '
-               'below it. The original project reported R² ≈ 0.95 on price levels — a value the random walk also achieves, which is why it '
-               'was misleading. The Diebold–Mariano p-values show that none of the served models\' errors differ significantly from the '
-               'random walk\'s; models that deviate more (ARIMA, GRU, LSTM) are significantly worse. The correct reading is that the '
-               'best achievable one-day point forecast on this data is approximately the drift, and the system says so.'))
-    F.append(P('<b>Current status:</b> implementation complete; pipeline reproducible bit-for-bit; dashboard and API verified running for all '
-               'three assets; documentation and viva notes prepared. <b>Recommended framing:</b> a leakage-audited forecasting benchmark and '
-               'decision-support prototype with a validated negative result — not a market-beating predictor.', 'box'))
+    F.append(P('R² is reported on returns, where 0 means "as good as predicting the mean". The original project reported R² ≈ 0.95 on '
+               'price levels — a value the random walk also achieves, which is why it was misleading. For Bitcoin and Gold the served models\' '
+               'errors do not differ significantly from the random walk\'s (DM p = 0.74, 0.42). For Silver they do (DM p = 0.002; 62 % '
+               'direction, p = 0.002), consistently across regimes — but the same model scored 53 % on walk-forward validation, so this is a '
+               'period-specific result, stated with that caveat. On identical unseen days the improvement phase lowered return-RMSE by '
+               '1.9 % (Gold) and 2.8 % (Silver) and left Bitcoin unchanged; the gain came from 2.9× more data, not from model complexity.'))
+    F.append(P('<b>Current status:</b> implementation complete; pipeline reproducible; dashboard (with the unseen-day demonstration) and API '
+               'verified running for all three assets; documentation, demo guide and viva notes prepared. <b>Recommended framing:</b> a '
+               'leakage-audited forecasting benchmark and decision-support prototype whose predictions can be verified day by day — '
+               'not a market-beating predictor.', 'box'))
     doc.build(F, canvasmaker=NumberedCanvas)
     print('wrote', OUT_SUMMARY)
 

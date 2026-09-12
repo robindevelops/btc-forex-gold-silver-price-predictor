@@ -23,7 +23,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from config import (PROCESSED_DATA_DIR, RESULTS_DIR, FIGURES_DIR, SEQ_LEN, PREDICTION_HORIZON_DAYS,
                     TRAIN_END, VAL_END, ASSETS, get_prefix, load_model_status)
-from src.inference.prediction import predict_next_day, predict_all_models, available_models, DISCLAIMER
+from src.inference.prediction import (predict_next_day, predict_for_date, predict_all_models, available_models,
+                                      prediction_history, DISCLAIMER)
 from src.data.sync_live_data import update_live_data
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def load_csv(name: str) -> Optional[pd.DataFrame]:
 @st.cache_data(ttl=600)
 def load_test_predictions(asset: str) -> Optional[pd.DataFrame]:
     path = os.path.join(RESULTS_DIR, 'predictions', f'{get_prefix(asset)}_test_predictions.csv')
-    return pd.read_csv(path, parse_dates=['date']) if os.path.exists(path) else None
+    return pd.read_csv(path, parse_dates=['date', 'target_date']) if os.path.exists(path) else None
 
 
 def fmt_pct(x):
@@ -111,7 +112,8 @@ st.sidebar.info(f"**Served model:** {served}\n\n**Horizon:** {PREDICTION_HORIZON
 
 # ─────────────────────────────────────────────── main
 st.title(f"📈 {asset} — Next-Day Forecast Dashboard")
-tab1, tab2, tab3 = st.tabs(["📊 Forecast & Indicators", "⚙️ Model Performance", "📋 Methodology & Models"])
+tab1, tab_demo, tab_hist, tab2, tab3 = st.tabs(["📊 Forecast & Indicators", "🎯 Predict a Day (unseen test)",
+                                                  "🗂️ Prediction History", "⚙️ Model Performance", "📋 Methodology & Models"])
 df = load_features(asset)
 
 with tab1:
@@ -231,10 +233,10 @@ with tab1:
                     st.subheader(f"Model validation: {selected_model} on the untouched test period")
                     fr = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_heights=[0.5, 0.5],
                                        subplot_titles=("Next-day log return: actual vs predicted (%)", "Price: actual vs predicted"))
-                    fr.add_trace(go.Scatter(x=tp['date'], y=tp['actual_return'] * 100, name='actual return', line=dict(color='white', width=1)), row=1, col=1)
-                    fr.add_trace(go.Scatter(x=tp['date'], y=tp[f'pred_return_{selected_model}'] * 100, name=f'{selected_model} return', line=dict(color='#00ffcc', width=1.5)), row=1, col=1)
-                    fr.add_trace(go.Scatter(x=tp['date'], y=tp['actual_close'], name='actual close', line=dict(color=COLOR[asset], width=2)), row=2, col=1)
-                    fr.add_trace(go.Scatter(x=tp['date'], y=tp[f'pred_close_{selected_model}'], name=f'{selected_model} close', line=dict(color='#00ffcc', width=1.5, dash='dash')), row=2, col=1)
+                    fr.add_trace(go.Scatter(x=tp['target_date'], y=tp['actual_return'] * 100, name='actual return', line=dict(color='white', width=1)), row=1, col=1)
+                    fr.add_trace(go.Scatter(x=tp['target_date'], y=tp[f'pred_return_{selected_model}'] * 100, name=f'{selected_model} return', line=dict(color='#00ffcc', width=1.5)), row=1, col=1)
+                    fr.add_trace(go.Scatter(x=tp['target_date'], y=tp['actual_close'], name='actual close', line=dict(color=COLOR[asset], width=2)), row=2, col=1)
+                    fr.add_trace(go.Scatter(x=tp['target_date'], y=tp[f'pred_close_{selected_model}'], name=f'{selected_model} close', line=dict(color='#00ffcc', width=1.5, dash='dash')), row=2, col=1)
                     fr.update_layout(template="plotly_dark", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", height=620,
                                      margin=dict(l=0, r=0, t=40, b=0), hovermode="x unified")
                     st.plotly_chart(fr, use_container_width=True)
@@ -250,6 +252,101 @@ with tab1:
             except Exception as e:
                 st.error(f"Prediction failed: {e}")
                 logger.exception("Dashboard prediction error")
+
+# ─────────────────────────────────────────────── demo: predict any day of the unseen test period
+with tab_demo:
+    st.header("🎯 Predict a Day — unseen test period")
+    st.markdown(
+        f"Pick a day. The model sees data **only up to that day**, predicts the next trading day's close, "
+        f"and then the actual close is revealed. Days after **{VAL_END}** were never used for training, "
+        f"validation or model selection (frozen chronological split).")
+    hist = prediction_history(asset)
+    if hist is None or df is None:
+        st.warning("Run `python src/evaluation/backtesting.py` first to generate the unseen-test predictions.")
+    else:
+        test_days = list(hist['date'].dt.date)
+        c1, c2, c3 = st.columns([2, 2, 1])
+        with c1:
+            pick = st.selectbox("Stand on this day (data available up to and including it)", test_days, index=len(test_days) - 1,
+                                format_func=lambda d: d.strftime('%Y-%m-%d (%a)'))
+        with c2:
+            demo_model = st.selectbox("Model", models, index=models.index(served) if served in models else 0, key='demo_model')
+        with c3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            go_demo = st.button("🎯 Generate Prediction", use_container_width=True)
+        if go_demo or st.session_state.get('demo_done'):
+            st.session_state['demo_done'] = True
+            try:
+                r = predict_for_date(asset, str(pick), demo_model)
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric(f"Close on {r['as_of_date']}", f"${r['current_price']:,.2f}")
+                m2.metric(f"Predicted close for {r['actual_date'] or 'next day'}", f"${r['predicted_price']:,.2f}",
+                          f"{r['predicted_return_pct']:+.2f}%")
+                if r['actual_price'] is not None:
+                    m3.metric("Actual close", f"${r['actual_price']:,.2f}", f"{r['actual_return_pct']:+.2f}%")
+                    m4.metric("Prediction error", f"{r['error_pct']:+.2f}%", f"{r['error_usd']:+,.2f} USD", delta_color="off")
+                    hit = r['direction_hit']
+                    m5.metric("Direction", f"{r['direction']} → {'✅ hit' if hit else ('❌ miss' if hit is not None else '—')}")
+                else:
+                    m3.metric("Actual close", "not yet known")
+                st.caption(f"Model: **{r['model_used']}** · horizon: {r['horizon_days']} trading day · "
+                           f"{'inside the unseen test period' if r['in_unseen_test_period'] else 'inside the training/validation period'} · "
+                           "the prediction uses only data up to the chosen day.")
+
+                # chart: unseen period, actual vs predicted, highlighted day
+                col_pred = f'pred_close_{demo_model}'
+                if col_pred in hist.columns:
+                    fd = go.Figure()
+                    fd.add_trace(go.Scatter(x=hist['target_date'], y=hist['actual_close'], mode='lines', name='actual close',
+                                            line=dict(color=COLOR[asset], width=2)))
+                    fd.add_trace(go.Scatter(x=hist['target_date'], y=hist[col_pred], mode='lines', name=f'{demo_model} predicted close',
+                                            line=dict(color='#00ffcc', width=1.5, dash='dash')))
+                    if r['actual_price'] is not None:
+                        fd.add_trace(go.Scatter(x=[pd.Timestamp(r['actual_date'])], y=[r['predicted_price']], mode='markers', name='this prediction',
+                                                marker=dict(color='#00ffcc', size=14, symbol='diamond', line=dict(color='white', width=1))))
+                        fd.add_trace(go.Scatter(x=[pd.Timestamp(r['actual_date'])], y=[r['actual_price']], mode='markers', name='actual',
+                                                marker=dict(color=COLOR[asset], size=14, symbol='circle', line=dict(color='white', width=1))))
+                    fd.update_layout(template="plotly_dark", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", height=420,
+                                     margin=dict(l=0, r=0, t=40, b=0), hovermode="x unified", yaxis=dict(tickprefix="$"),
+                                     title=f"Unseen test period {hist['target_date'].min().date()} → {hist['target_date'].max().date()}: actual vs predicted ({demo_model})")
+                    st.plotly_chart(fd, use_container_width=True)
+
+                # all models on this day
+                rows = predict_all_models(asset, str(pick))
+                if rows:
+                    t = pd.DataFrame(rows)
+                    t['Predicted'] = t['predicted_price'].map(lambda v: f"${v:,.2f}")
+                    t['Actual'] = t['actual_price'].map(lambda v: f"${v:,.2f}" if pd.notna(v) else "—")
+                    t['Error'] = t['error_pct'].map(lambda v: f"{v:+.2f}%" if pd.notna(v) else "—")
+                    t['Served'] = t['model'].map(lambda m: '✅' if m == served else '')
+                    st.dataframe(t[['model', 'Predicted', 'Actual', 'Error', 'Served']], use_container_width=True, hide_index=True)
+                st.warning(DISCLAIMER)
+            except Exception as e:
+                st.error(f"Prediction failed: {e}")
+                logger.exception("Demo prediction error")
+
+# ─────────────────────────────────────────────── prediction history (out-of-sample log)
+with tab_hist:
+    st.header("🗂️ Prediction History — every unseen test day")
+    hist = prediction_history(asset)
+    if hist is None:
+        st.warning("Run `python src/evaluation/backtesting.py` first.")
+    else:
+        hm = st.selectbox("Model", [m for m in models if f'pred_close_{m}' in hist.columns] + ['Naive'],
+                          index=0 if served not in models else models.index(served), key='hist_model')
+        h = pd.DataFrame({'Predicted on': hist['date'].dt.date, 'For': hist['target_date'].dt.date,
+                          'Predicted ($)': hist[f'pred_close_{hm}'].round(2), 'Actual ($)': hist['actual_close'].round(2),
+                          'Error (%)': hist[f'error_pct_{hm}'].round(2), 'Direction hit': hist[f'direction_hit_{hm}'].map({1: '✅', 0: '❌'})})
+        e = hist[f'error_pct_{hm}'].abs()
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Unseen days", len(h))
+        k2.metric("Mean absolute error", f"{e.mean():.2f}%")
+        k3.metric("Median absolute error", f"{e.median():.2f}%")
+        k4.metric("Direction hit rate", f"{hist[f'direction_hit_{hm}'].mean() * 100:.1f}%")
+        st.dataframe(h.sort_values('For', ascending=False), use_container_width=True, hide_index=True, height=480)
+        st.download_button("Download history (CSV)", h.to_csv(index=False).encode(), file_name=f"{asset.lower()}_prediction_history.csv")
+        st.caption("Every row is an out-of-sample prediction: the model was trained on data up to "
+                   f"{VAL_END} and each prediction used only data up to the 'Predicted on' date.")
 
 with tab2:
     st.header("⚙️ Model Performance")
@@ -276,13 +373,32 @@ with tab2:
                              'DM p vs naive': t['DM_pvalue'].round(3), 'Strategy %': t['strategy_return_pct'].round(1),
                              'Buy&Hold %': t['buy_hold_return_pct'].round(1)})
         st.dataframe(show, use_container_width=True, hide_index=True)
-        naive = t[t['model'] == 'Naive-Zero'].iloc[0]; best = t[t['model'] == served].iloc[0]
+        naive = t[t['model'] == 'Naive'].iloc[0]; best = t[t['model'] == served].iloc[0]
         beats = best['RMSE_ret'] < naive['RMSE_ret']
         st.info(f"**Honest reading:** on the test set the served model's RMSE(return) is {best['RMSE_ret']:.5f} vs {naive['RMSE_ret']:.5f} for the "
                 f"random-walk forecast — it {'does' if beats else 'does not'} beat the naive baseline on magnitude"
                 f"{' (Diebold–Mariano p = %.2f, %s)' % (best['DM_pvalue'], 'significant' if best['DM_pvalue'] < 0.05 else 'not significant at 5%')}. "
                 f"Directional accuracy is {best['DirAcc_pct']:.1f}% on {int(best['DirAcc_n'])} non-flat days (binomial p = {best['DirAcc_pvalue']:.2f}). "
                 "R² on price levels is intentionally not shown: a random walk scores ≈0.95 there.")
+        reg = load_csv('regime_analysis.csv')
+        if reg is not None:
+            st.subheader("Performance across market regimes (unseen test period)")
+            rg = reg[reg['asset'] == asset].copy()
+            rg = pd.DataFrame({'Regime': rg['regime'], 'Days': rg['n_days'], f'MAE % ({served})': rg['mae_pct_served'].round(2),
+                               'MAE % (naive)': rg['mae_pct_naive'].round(2), f'Direction hit % ({served})': rg['dir_hit_served_pct'].round(1),
+                               'RMSE ret (served)': rg['rmse_ret_served'].round(5), 'RMSE ret (naive)': rg['rmse_ret_naive'].round(5)})
+            st.dataframe(rg, use_container_width=True, hide_index=True)
+            st.caption("Regimes are defined on the day the prediction is made (30-day volatility tercile, sign of the 20-day return), "
+                       "so they never use future information.")
+        with st.expander("Design experiments (validation only): data size, feature ablation, horizon, volatility"):
+            for fname, title in (('E1_data_size.csv', 'E1 — training-data size (fixed validation window)'),
+                                 ('E2_feature_ablation.csv', 'E2 — feature-group ablation (walk-forward CV)'),
+                                 ('E3_horizon.csv', 'E3 — next-day vs 5-day return target'),
+                                 ('E4_volatility.csv', 'E4 — 22-day realised-volatility target')):
+                ex = load_csv(os.path.join('experiments', fname))
+                if ex is not None:
+                    st.markdown(f"**{title}**")
+                    st.dataframe(ex[ex['asset'] == asset].round(4), use_container_width=True, hide_index=True)
         for name in ('model_comparison_test.png', f'{get_prefix(asset)}_actual_vs_predicted.png', f'{get_prefix(asset)}_feature_importance.png',
                      f'{get_prefix(asset)}_loss_curves.png', f'{get_prefix(asset)}_strategy.png', 'overfitting_gap.png'):
             p = os.path.join(FIGURES_DIR, name)
@@ -295,7 +411,7 @@ with tab3:
 **Task.** Predict the next trading day's log return, `y_t = ln(P_(t+1) / P_t)`, and convert it to a price with `P̂_(t+1) = P_t · exp(ŷ_t)`.
 Predicting the return (not the price) makes the target stationary and makes the random-walk baseline explicit.
 
-**Split (frozen, chronological, no shuffling).** train ≤ {TRAIN_END} · validation ≤ {VAL_END} · test = remainder.
+**Data.** Yahoo Finance daily data from {status.get('data_start', '2018')} ({status.get('n_train', '?')} training days). **Split (frozen, chronological, no shuffling).** train ≤ {TRAIN_END} · validation ≤ {VAL_END} · test = remainder.
 The scaler is fitted on train only; hyper-parameters and the served model are chosen by 4-fold expanding-window
 walk-forward validation inside train+val; the test set is evaluated once by `src/evaluation/backtesting.py`.
 

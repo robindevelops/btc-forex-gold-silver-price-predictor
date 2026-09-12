@@ -1,5 +1,16 @@
 # Changelog
 
+## [Improvement phase] — 2026-09-12 — more data, measured improvements, demonstration mode
+
+- **Data:** full Yahoo Finance history 2018-01 → 2026-09-12 (2.9× more training data; test window extended to 2026-09-12). 3-year raw files and results archived (`data/raw_3y_backup/`, `results/archive_3y_final/`).
+- **Features:** HAR realised volatilities (`rv_1d/5d/22d`), RiskMetrics EWMA volatility, 20-day momentum (Bitcoin 29 / Gold 28 / Silver 29 features).
+- **Targets/tasks:** `build_dataset(asset, task=…)` with `return_1d` (served), `return_5d`, `vol_5d`, `vol_22d`; split defined by the dates the target covers (exact purge/embargo); targets standardised with training statistics.
+- **Experiments** (`src/experiments/`): E1 data size, E2 feature-group ablation, E3 horizon, E4 volatility target — validation only; `before_after.py` compares the two systems on identical unseen days.
+- **Evaluation:** prediction history with per-day error and direction hit; regime analysis (volatility terciles, trend, up/down days); volatility metrics (QLIKE, log-RMSE).
+- **Dashboard:** *Predict a Day (unseen test)* — pick any test day, predict the next close from data up to that day, reveal the actual, error, hit/miss, highlighted on the actual-vs-predicted chart, all models on that day; *Prediction History* tab with MAE / hit-rate KPIs and CSV download; regime table and experiment tables on the Performance tab; `?asset=…&run=1` deep links.
+- **Results:** Gold −1.9 % and Silver −2.8 % return-RMSE on identical unseen days; Silver's served LightGBM is significantly better than the random walk on the 2026 test window (62.2 % direction, p = 0.002; DM p = 0.002); Bitcoin unchanged. See `docs/RESULTS.md`.
+- Tests: 31 cases (task targets, embargo, standardisation round-trip, predict-for-date look-ahead check).
+
 ## [FYP release] — 2026-09-12 — Audit → fix → validated pipeline
 
 Full list with rationale in `docs/FIX_PLAN.md`; original findings in `docs/AUDIT_SUMMARY.md`.

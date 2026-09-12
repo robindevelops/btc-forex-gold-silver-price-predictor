@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
-from config import (RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG,
-                    LEVEL_COLUMNS, TARGET_COL, TRAIN_END, VAL_END, SEQ_LEN, get_prefix)
+from config import (RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG, LEVEL_COLUMNS, TARGET_COL,
+                    TRAIN_END, VAL_END, SEQ_LEN, TASKS, DEFAULT_TASK, get_prefix)
 
 
 class DataCleaner:
@@ -97,10 +97,20 @@ class DataCleaner:
         """return_kd = log return observed k days ago (strictly past)."""
         for lag in lags:
             self.df[f'return_{lag}d'] = self.df['log_return'].shift(lag)
+        # cumulative momentum over the last 20 days (monthly momentum / reversal literature)
+        self.df['return_20d'] = self.df['log_return'].rolling(20).sum()
 
     def add_rolling_volatility(self, windows=(10, 30)):
         for w in windows:
             self.df[f'volatility_{w}d'] = self.df['log_return'].rolling(window=w).std()
+        # HAR-style realised volatilities (Corsi 2009): daily, weekly, monthly RMS of returns, all backward-looking
+        r2 = self.df['log_return'] ** 2
+        self.df['rv_1d'] = np.sqrt(r2)
+        self.df['rv_5d'] = np.sqrt(r2.rolling(5).mean())
+        self.df['rv_22d'] = np.sqrt(r2.rolling(22).mean())
+        # RiskMetrics EWMA volatility (lambda = 0.94), initialised on the first 22 days
+        ewma_var = r2.ewm(alpha=1 - 0.94, min_periods=22, adjust=False).mean()
+        self.df['ewma_vol'] = np.sqrt(ewma_var)
 
     def add_calendar_features(self):
         """Cyclical day-of-week. Only meaningful for the 7-day crypto market."""
@@ -251,20 +261,49 @@ def create_sequences(data, seq_len=SEQ_LEN, target_col=TARGET_COL):
     return np.array(X), np.array(y).reshape(-1, 1)
 
 
-def build_dataset(asset_name, seq_len=SEQ_LEN):
+def _make_windows(values, seq_len):
+    return np.stack([values[i:i + seq_len] for i in range(len(values) - seq_len + 1)])
+
+
+def _task_target(log_return, task):
+    """
+    Real-space target series indexed by the date of day t (the last observed day).
+        return_h : sum_{k=1..h} r_{t+k}
+        vol_h    : ln sqrt( mean_{k=1..h} r_{t+k}^2 )
+    Only FUTURE rows enter the target; features at t never see them.
+    """
+    h, kind = TASKS[task]['horizon'], TASKS[task]['kind']
+    r = log_return
+    if kind == 'return':
+        fwd = sum(r.shift(-k) for k in range(1, h + 1))
+    else:
+        fwd = np.log(np.sqrt(sum(r.shift(-k) ** 2 for k in range(1, h + 1)) / h).clip(lower=1e-6))
+    return fwd
+
+
+def build_dataset(asset_name, seq_len=SEQ_LEN, task=DEFAULT_TASK, train_start=None):
     """
     The ONE loader used by tuning, training, stacking, evaluation and inference.
 
+    Args:
+        task        : key of config.TASKS ('return_1d' is served; others are experiments)
+        train_start : optional date string — drop training rows before it (data-size experiments)
+
     Returns a dict with, for each split in ('train', 'val', 'test'):
-        X_<split>      (n, seq_len, F)  scaled windows           (recurrent models)
-        Xt_<split>     (n, F)           last row of each window  (tabular models)
-        y_<split>      (n, 1)           scaled next-day log return
-        dates_<split>  DatetimeIndex    date of the predicted day (t+1)
-        prev_<split>   ndarray          close price on day t (for price reconstruction)
-        true_<split>   ndarray          actual close on day t+1
-    plus 'columns', 'target_idx', 'scaler', 'features' (unscaled feature frame).
-    Windows are built on the concatenated (train|val|test) frame so that the first
-    val/test samples can look back into earlier data — this uses only PAST rows.
+        X_<split>      (n, seq_len, F)  scaled windows of features up to day t     (recurrent models)
+        Xt_<split>     (n, F)           last row of each window = features at t   (tabular models)
+        y_<split>      (n, 1)           standardised target (z-scored with TRAIN mean/std)
+        y_real_<split> (n,)             target in real units (log return / log RV)
+        dates_<split>  DatetimeIndex    day t (last observed day); the target covers t+1 … t+h
+        target_dates_<split>             date of the last day the target covers (t+h)
+        prev_<split>   ndarray          close on day t
+        true_<split>   ndarray          close on day t+h (return tasks)
+        naive_<split>  ndarray          task-specific naive forecast in real units (0 for returns,
+                                        last realised vol for the vol task)
+    plus 'columns', 'features', 'scaler', 'inv' (model → real), 'fwd' (real → model), 'task', 'horizon'.
+
+    Splits are defined by the dates the target covers, so a training target never reaches past
+    TRAIN_END and a validation target never reaches past VAL_END (exact purge/embargo for h > 1).
     """
     prefix = get_prefix(asset_name)
     read = lambda s: pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_{s}_scaled.csv'),
@@ -273,30 +312,50 @@ def build_dataset(asset_name, seq_len=SEQ_LEN):
     features = pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{prefix}_features.csv'),
                            index_col='timestamp', parse_dates=True)
     scaler = joblib.load(os.path.join(MODELS_DIR, f'{prefix}_scaler.pkl'))
+    h = TASKS[task]['horizon']
 
     full = pd.concat([train_df, val_df, test_df])
-    X, y = create_sequences(full, seq_len)
-    target_dates = full.index[seq_len:]              # date of the predicted day
-    prev_dates = full.index[seq_len - 1:-1]          # day t
+    X = _make_windows(full.values, seq_len)              # window i ends at row i+seq_len-1
+    dates_t = full.index[seq_len - 1:]                   # day t for each window
     price = features['price']
+    target = _task_target(features['log_return'], task).reindex(dates_t)
+    valid = target.notna().values
+    X, dates_t, target = X[valid], dates_t[valid], target[valid]
 
-    out = {'columns': list(full.columns), 'target_idx': list(full.columns).index(TARGET_COL),
-           'scaler': scaler, 'features': features, 'seq_len': seq_len}
-    bounds = {'train': (None, pd.Timestamp(TRAIN_END)),
-              'val': (pd.Timestamp(TRAIN_END), pd.Timestamp(VAL_END)),
-              'test': (pd.Timestamp(VAL_END), None)}
-    for split, (lo, hi) in bounds.items():
-        m = np.ones(len(target_dates), bool)
-        if lo is not None:
-            m &= target_dates > lo
-        if hi is not None:
-            m &= target_dates <= hi
+    # Split by the dates the TARGET covers (t+1 … t+h): a training target must end on or before
+    # TRAIN_END, a validation target must start after TRAIN_END and end on or before VAL_END, and a
+    # test target must start after VAL_END. For h > 1 this is an exact purge/embargo by construction.
+    pos = features.index.get_indexer(dates_t)
+    first_target = features.index[pos + 1]
+    last_target = features.index[np.minimum(pos + h, len(features) - 1)]
+    t_end, v_end = pd.Timestamp(TRAIN_END), pd.Timestamp(VAL_END)
+    masks = {'train': (last_target <= t_end) & ((dates_t >= pd.Timestamp(train_start)) if train_start else True),
+             'val': (first_target > t_end) & (last_target <= v_end),
+             'test': first_target > v_end}
+    masks = {k: np.asarray(v, bool) for k, v in masks.items()}
+
+    y_tr_real = target.values[masks['train']]
+    mu, sd = float(y_tr_real.mean()), float(y_tr_real.std() or 1.0)
+    fwd = lambda v: (np.ravel(v) - mu) / sd
+    inv = lambda v: np.ravel(v) * sd + mu
+
+    naive_feat = TASKS[task]['naive_feature']
+    out = {'columns': list(full.columns), 'features': features, 'scaler': scaler, 'seq_len': seq_len,
+           'task': task, 'horizon': h, 'kind': TASKS[task]['kind'], 'inv': inv, 'fwd': fwd, 'target_mean': mu, 'target_std': sd}
+    for split, m in masks.items():
+        d = dates_t[m]
         out[f'X_{split}'] = X[m]
         out[f'Xt_{split}'] = X[m][:, -1, :]
-        out[f'y_{split}'] = y[m]
-        out[f'dates_{split}'] = target_dates[m]
-        out[f'prev_{split}'] = price.loc[prev_dates[m]].values
-        out[f'true_{split}'] = price.loc[target_dates[m]].values
+        out[f'y_real_{split}'] = target.values[m]
+        out[f'y_{split}'] = fwd(target.values[m]).reshape(-1, 1)
+        out[f'dates_{split}'] = d
+        out[f'target_dates_{split}'] = last_target[m]
+        out[f'prev_{split}'] = price.loc[d].values
+        out[f'true_{split}'] = price.loc[last_target[m]].values if TASKS[task]['kind'] == 'return' else None
+        if naive_feat:
+            out[f'naive_{split}'] = np.log(features[naive_feat].loc[d].values.clip(1e-6))
+        else:
+            out[f'naive_{split}'] = np.zeros(len(d))
     return out
 
 

@@ -22,9 +22,15 @@ import joblib
 from config import MODELS_DIR, get_prefix
 from src.utils.reproducibility import set_all_seeds
 
+def artefact_stem(asset_name, model_name, task='return_1d'):
+    """data/models/<prefix>_<model>[_<task>] — the served return task keeps the short name."""
+    stem = f'{get_prefix(asset_name)}_{model_name.lower()}'
+    return stem if task == 'return_1d' else f'{stem}_{task}'
+
+
 TABULAR = ('Ridge', 'RandomForest', 'LightGBM', 'CatBoost')
 RECURRENT = ('GRU', 'LSTM')
-BASELINES = ('Naive-Zero', 'Naive-Mean', 'ARIMA')
+BASELINES = ('Naive', 'Naive-Mean', 'ARIMA')
 ALL_MODELS = BASELINES + TABULAR + RECURRENT
 
 
@@ -48,34 +54,40 @@ class BaseModel:
         return None
 
     # ----- persistence
-    def save(self, asset_name):
-        path = os.path.join(MODELS_DIR, f'{get_prefix(asset_name)}_{self.name.lower()}.pkl')
+    def save(self, asset_name, task='return_1d'):
+        path = os.path.join(MODELS_DIR, f'{artefact_stem(asset_name, self.name, task)}.pkl')
         joblib.dump({'model': self.model, 'params': self.params, 'fit_info': self.fit_info}, path)
         return path
 
-    def load(self, asset_name):
-        path = os.path.join(MODELS_DIR, f'{get_prefix(asset_name)}_{self.name.lower()}.pkl')
+    def load(self, asset_name, task='return_1d'):
+        path = os.path.join(MODELS_DIR, f'{artefact_stem(asset_name, self.name, task)}.pkl')
         obj = joblib.load(path)
         self.model, self.params, self.fit_info = obj['model'], obj['params'], obj['fit_info']
         return self
 
 
 # ============================================================ baselines
-class NaiveZero(BaseModel):
-    """Random-walk forecast: r̂ = 0  ⇔  P̂_{t+1} = P_t. THE baseline every model must beat."""
-    name, kind = 'Naive-Zero', 'baseline'
+class NaiveModel(BaseModel):
+    """
+    Task-specific naive forecast, THE baseline every model must beat:
+        return tasks : r̂ = 0  (random walk: P̂_{t+h} = P_t)
+        vol task     : σ̂ = last realised volatility (persistence)
+    The actual naive values come from the dataset (`data['naive_<split>']`); this class only
+    carries a constant for API compatibility.
+    """
+    name, kind = 'Naive', 'baseline'
 
-    def __init__(self, params=None, scaled_zero=0.0):
+    def __init__(self, params=None, constant=0.0):
         super().__init__(params)
-        self.scaled_zero = scaled_zero
+        self.constant = constant
 
     def fit(self, Xseq_tr, Xt_tr, y_tr, *a, **k):
         return self
 
     def predict(self, Xseq, Xt):
-        return np.full(len(Xt), self.scaled_zero)
+        return np.full(len(Xt), self.constant)
 
-    def save(self, asset_name):
+    def save(self, asset_name, task='return_1d'):
         return None
 
 
@@ -90,13 +102,13 @@ class NaiveMean(BaseModel):
     def predict(self, Xseq, Xt):
         return np.full(len(Xt), self.model)
 
-    def save(self, asset_name):
+    def save(self, asset_name, task='return_1d'):
         return None
 
 
 class ARIMAModel(BaseModel):
     """
-    ARIMA(p,0,q) on the scaled return series (returns are already the differenced series,
+    ARIMA(p,0,q) on the standardised target series (returns are already the differenced series,
     so d=0). Order chosen by AIC on the training window. One-step-ahead forecasts are made
     walk-forward: after each day the observed value is appended (no refit).
     Needs the raw series, so it is handled specially in evaluation (see fit_series/forecast).
@@ -129,7 +141,7 @@ class ARIMAModel(BaseModel):
             res = res.append([v], refit=False)
         return np.array(preds)
 
-    def save(self, asset_name):
+    def save(self, asset_name, task='return_1d'):
         return None
 
 
@@ -232,16 +244,16 @@ class CatBoostModel(BaseModel):
         imp = self.model.get_feature_importance()
         return dict(zip(columns, imp / max(imp.sum(), 1e-12)))
 
-    def save(self, asset_name):
-        path = os.path.join(MODELS_DIR, f'{get_prefix(asset_name)}_catboost.cbm')
+    def save(self, asset_name, task='return_1d'):
+        path = os.path.join(MODELS_DIR, f'{artefact_stem(asset_name, self.name, task)}.cbm')
         self.model.save_model(path)
         with open(path + '.json', 'w') as f:
             json.dump({'params': self.params, 'fit_info': self.fit_info}, f)
         return path
 
-    def load(self, asset_name):
+    def load(self, asset_name, task='return_1d'):
         from catboost import CatBoostRegressor
-        path = os.path.join(MODELS_DIR, f'{get_prefix(asset_name)}_catboost.cbm')
+        path = os.path.join(MODELS_DIR, f'{artefact_stem(asset_name, self.name, task)}.cbm')
         self.model = CatBoostRegressor(); self.model.load_model(path)
         with open(path + '.json') as f:
             meta = json.load(f)
@@ -293,16 +305,16 @@ class _KerasSequenceModel(BaseModel):
     def predict(self, Xseq, Xt):
         return np.ravel(self.model.predict(Xseq, verbose=0))
 
-    def save(self, asset_name):
-        path = os.path.join(MODELS_DIR, f'{get_prefix(asset_name)}_{self.name.lower()}.keras')
+    def save(self, asset_name, task='return_1d'):
+        path = os.path.join(MODELS_DIR, f'{artefact_stem(asset_name, self.name, task)}.keras')
         self.model.save(path)
         with open(path + '.json', 'w') as f:
             json.dump({'params': self.params, 'fit_info': self.fit_info, 'history': self.history}, f)
         return path
 
-    def load(self, asset_name):
+    def load(self, asset_name, task='return_1d'):
         from tensorflow.keras.models import load_model
-        path = os.path.join(MODELS_DIR, f'{get_prefix(asset_name)}_{self.name.lower()}.keras')
+        path = os.path.join(MODELS_DIR, f'{artefact_stem(asset_name, self.name, task)}.keras')
         self.model = load_model(path)
         with open(path + '.json') as f:
             meta = json.load(f)
@@ -329,15 +341,20 @@ class LSTMModel(_KerasSequenceModel):
 
 
 # ============================================================ factory
-_REGISTRY = {c.name: c for c in (NaiveZero, NaiveMean, ARIMAModel, RidgeModel, RandomForestModel,
+_REGISTRY = {c.name: c for c in (NaiveModel, NaiveMean, ARIMAModel, RidgeModel, RandomForestModel,
                                  LightGBMModel, CatBoostModel, GRUModel, LSTMModel)}
 
 
 def make_model(name, params=None, **kw):
     if name not in _REGISTRY:
         raise ValueError(f"Unknown model '{name}'. Known: {list(_REGISTRY)}")
-    return _REGISTRY[name](params, **kw) if name == 'Naive-Zero' else _REGISTRY[name](params)
+    return _REGISTRY[name](params, **kw) if name == 'Naive' else _REGISTRY[name](params)
 
 
-def load_trained(name, asset_name):
-    return make_model(name).load(asset_name)
+def load_trained(name, asset_name, task='return_1d'):
+    return make_model(name).load(asset_name, task)
+
+
+def artefact_exists(name, asset_name, task='return_1d'):
+    stem = os.path.join(MODELS_DIR, artefact_stem(asset_name, name, task))
+    return any(os.path.exists(stem + ext) for ext in ('.pkl', '.cbm', '.keras'))

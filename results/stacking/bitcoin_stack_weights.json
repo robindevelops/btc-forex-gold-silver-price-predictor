@@ -7,9 +7,9 @@
   ],
   "weights": {
     "Ridge": 0.0,
-    "LightGBM": 0.0,
-    "CatBoost": 0.0,
+    "LightGBM": 0.38663998622455137,
+    "CatBoost": 0.30886829294264306,
     "GRU": 0.0
   },
-  "intercept": 0.44269202231262084
+  "intercept": 0.0063913546202562215
 }

@@ -9,6 +9,9 @@ All features are computed in `src/data/preprocessing.py::DataCleaner` at trading
 | 1 | `log_return` | `ln(P_t / P_{t−1})` | today's return; the strongest single predictor of short-term mean reversion / momentum | all |
 | 2–5 | `return_1d`, `return_2d`, `return_5d`, `return_10d` | `r_{t−k}` | lagged returns — lets the model see the recent path without a sequence model | all |
 | 6–7 | `volatility_10d`, `volatility_30d` | `std(r_{t−w+1..t})` | volatility clustering — the most robust stylised fact of financial returns; large moves follow large moves | all |
+| 6a | `return_20d` | `Σ r_{t−19..t}` | one-month momentum / reversal | all |
+| 6b–6d | `rv_1d`, `rv_5d`, `rv_22d` | `sqrt(mean r² over 1 / 5 / 22 days)` | HAR-style realised volatilities (daily, weekly, monthly) | all |
+| 6e | `ewma_vol` | RiskMetrics EWMA σ (λ = 0.94) | exponentially weighted volatility | all |
 | 8 | `RSI` | Wilder RSI(14) on `P` | bounded 0–100 momentum oscillator; overbought/oversold | all |
 | 9 | `ADX` | ADX(14) from `H,L,P` | trend-strength (0–100), regime indicator | all |
 | 10 | `ROC` | `(P_t / P_{t−12} − 1)·100` | 12-day rate of change | all |
@@ -30,7 +33,7 @@ All features are computed in `src/data/preprocessing.py::DataCleaner` at trading
 | 26–27 | `dow_sin`, `dow_cos` | `sin/cos(2π·weekday/7)` | 7-day crypto market has documented weekend effects | Bitcoin |
 | 28 | `log_volume_change` | `clip(ln(V_t / V_{t−1}), −3, 3)` | attention / activity spikes | Bitcoin |
 
-Counts: Bitcoin 24, Gold 23, Silver 24.
+Counts: Bitcoin 29, Gold 28, Silver 29. (Added in the improvement phase: `return_20d`, `rv_1d`, `rv_5d`, `rv_22d`, `ewma_vol`; see `results/experiments/E2_feature_ablation.csv` for their measured effect.)
 
 ## Kept for charts only (never model inputs — `config.LEVEL_COLUMNS`)
 `open, high, low, price, volume, EMA_14, EMA_30, BB_Mid, BB_Upper, BB_Lower, ATR, MACD, MACD_Signal`
@@ -44,4 +47,5 @@ Why excluded: they are price levels. Gold's test period (Feb–Jul 2026, $3,986�
 * **Sentiment/news for metals** — no free, reliable daily source.
 
 ## Target
-`y_t = log_return_{t+1} = ln(P_{t+1} / P_t)` — created only inside `create_sequences` as the next row's `log_return`; the window never contains that row.
+Served task `return_1d`: `y_t = ln(P_{t+1} / P_t)`, built in `build_dataset()` from the day after the window; the window never contains that row.
+Experimental tasks (`config.TASKS`): `return_5d` = Σ r_{t+1..t+5}; `vol_22d` = ln sqrt(mean r²_{t+1..t+22}). Splits are defined by the dates the target covers, so multi-day targets never straddle a split boundary (exact embargo).

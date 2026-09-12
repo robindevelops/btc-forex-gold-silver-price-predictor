@@ -26,27 +26,24 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from config import (ASSETS, RESULTS_DIR, MODELS_DIR, TUNING_DIR, MODEL_STATUS_PATH, PREDICTION_HORIZON_DAYS,
-                    TRAIN_END, VAL_END, get_params, get_prefix, CV_FOLDS)
-from src.data.preprocessing import build_dataset, unscale_target
-from src.models.registry import make_model, load_trained, TABULAR, RECURRENT
+                    TRAIN_END, VAL_END, DATA_START_DATE, get_params, get_prefix, CV_FOLDS)
+from src.data.preprocessing import build_dataset
+from src.models.registry import make_model, load_trained, artefact_exists, TABULAR, RECURRENT
 from src.models.ensemble_model import StackedModel, stack_path
 from src.evaluation.cross_validation import cv_evaluate, summarise_folds
-from src.utils.metrics import evaluate_forecast
+from src.utils.metrics import evaluate_task
 from src.utils.logging_config import get_logger, setup_logging
 
 setup_logging()
 log = get_logger(__name__)
 ML_MODELS = list(TABULAR) + list(RECURRENT)
-BASELINE_MODELS = ['Naive-Zero', 'Naive-Mean', 'ARIMA']
+BASELINE_MODELS = ['Naive', 'Naive-Mean', 'ARIMA']
 PRED_DIR = os.path.join(RESULTS_DIR, 'predictions')
 os.makedirs(PRED_DIR, exist_ok=True)
 
 
 def model_exists(name, asset):
-    p = get_prefix(asset)
-    return os.path.exists(os.path.join(MODELS_DIR, f'{p}_{name.lower()}.pkl')) or \
-        os.path.exists(os.path.join(MODELS_DIR, f'{p}_{name.lower()}.keras')) or \
-        os.path.exists(os.path.join(MODELS_DIR, f'{p}_catboost.cbm')) and name == 'CatBoost'
+    return artefact_exists(name, asset)
 
 
 # ------------------------------------------------------------------ validation table
@@ -67,12 +64,11 @@ def cv_table(asset, data):
 
 # ------------------------------------------------------------------ test predictions
 def test_predictions(asset, data):
-    scaler, ti = data['scaler'], data['target_idx']
+    """Model-space predictions for the test split. Returns (preds, fit infos)."""
     Xs, Xt, y = data['X_test'], data['Xt_test'], data['y_test']
     y_trval = np.concatenate([data['y_train'], data['y_val']])
     preds = {}
-    zero_scaled = float(-scaler.data_min_[ti] / (scaler.data_max_[ti] - scaler.data_min_[ti]))
-    preds['Naive-Zero'] = np.full(len(y), zero_scaled)
+    preds['Naive'] = data['fwd'](data['naive_test'])
     preds['Naive-Mean'] = np.full(len(y), float(y_trval.mean()))
     arima = make_model('ARIMA').fit_series(np.ravel(y_trval))
     preds['ARIMA'] = arima.forecast_walk_forward(np.ravel(y))
@@ -92,27 +88,52 @@ def test_predictions(asset, data):
     return preds, infos
 
 
+def regime_analysis(asset, data, pred_df, served):
+    """Served model vs naive across market regimes of the unseen test period (regime defined on day t, i.e. before the prediction)."""
+    f = data['features']
+    d = pred_df.copy()
+    vol = f['volatility_30d'].reindex(d['date']).values
+    trend = f['return_20d'].reindex(d['date']).values
+    q = np.nanquantile(vol, [1 / 3, 2 / 3])
+    d['vol_regime'] = np.where(vol <= q[0], 'low volatility', np.where(vol <= q[1], 'medium volatility', 'high volatility'))
+    d['trend_regime'] = np.where(trend > 0, 'up-trend (20d)', 'down-trend (20d)')
+    d['day_regime'] = np.where(d['actual_return'] > 0, 'up day', 'down day')
+    rows = []
+    for col in ('vol_regime', 'trend_regime', 'day_regime'):
+        for g, sub in d.groupby(col):
+            rows.append({'asset': asset, 'regime_type': col, 'regime': g, 'n_days': len(sub),
+                         'mae_pct_served': float(sub[f'error_pct_{served}'].abs().mean()),
+                         'mae_pct_naive': float(sub['error_pct_Naive'].abs().mean()),
+                         'dir_hit_served_pct': float(sub[f'direction_hit_{served}'].mean() * 100),
+                         'rmse_ret_served': float(np.sqrt(np.mean((sub['actual_return'] - sub[f'pred_return_{served}']) ** 2))),
+                         'rmse_ret_naive': float(np.sqrt(np.mean(sub['actual_return'] ** 2)))})
+    return rows
+
+
 def main():
-    cv_rows, test_rows, status = [], [], {}
+    cv_rows, test_rows, status, regime_rows = [], [], {}, []
     for asset in ASSETS:
         log.info(f"===== {asset} =====")
         data = build_dataset(asset)
-        scaler, ti = data['scaler'], data['target_idx']
-        true_ret = unscale_target(data['y_test'], scaler, ti)
+        true_ret = data['y_real_test']
         prev = data['prev_test']
 
         cv_rows += cv_table(asset, data)
         preds, infos = test_predictions(asset, data)
 
-        pred_df = pd.DataFrame({'date': data['dates_test'], 'prev_close': prev,
+        # prediction history: one row per unseen day — what the model saw (date), what it predicted for
+        # target_date, what actually happened, and the error
+        pred_df = pd.DataFrame({'date': data['dates_test'], 'target_date': data['target_dates_test'], 'prev_close': prev,
                                 'actual_close': data['true_test'], 'actual_return': true_ret})
         for name, p in preds.items():
-            r = unscale_target(p, scaler, ti)
-            met = evaluate_forecast(true_ret, r, prev)
+            r = data['inv'](p)
+            met = evaluate_task(data, true_ret, r, data['naive_test'], prev)
             test_rows.append({'asset': asset, 'model': name, 'n_test': len(true_ret), **met,
                               'fit_info': json.dumps(infos.get(name, {}))})
             pred_df[f'pred_return_{name}'] = r
             pred_df[f'pred_close_{name}'] = prev * np.exp(r)
+            pred_df[f'error_pct_{name}'] = (prev * np.exp(r) - data['true_test']) / data['true_test'] * 100
+            pred_df[f'direction_hit_{name}'] = (np.sign(r) == np.sign(true_ret)).astype(int)
             log.info(f"  {name:12s} RMSE_ret={met['RMSE_ret']:.5f} R2_ret={met['R2_ret']:+.3f} "
                      f"DA={met['DirAcc_pct']:.1f}% (p={met['DirAcc_pvalue']:.2f}) DM p={met['DM_pvalue']:.2f} "
                      f"RMSE$={met['RMSE_usd']:,.2f} strat={met['strategy_return_pct']:+.1f}% B&H={met['buy_hold_return_pct']:+.1f}%")
@@ -122,9 +143,9 @@ def main():
         cv_df = pd.DataFrame([r for r in cv_rows if r['asset'] == asset])
         ml = cv_df[cv_df['model'].isin(ML_MODELS) & cv_df['model'].isin(preds.keys())]
         best = ml.sort_values('RMSE_ret_mean').iloc[0]
-        naive_cv = cv_df[cv_df['model'] == 'Naive-Zero'].iloc[0]
+        naive_cv = cv_df[cv_df['model'] == 'Naive'].iloc[0]
         test_best = [r for r in test_rows if r['asset'] == asset and r['model'] == best['model']][0]
-        test_naive = [r for r in test_rows if r['asset'] == asset and r['model'] == 'Naive-Zero'][0]
+        test_naive = [r for r in test_rows if r['asset'] == asset and r['model'] == 'Naive'][0]
         status[asset] = {
             'primary_model': best['model'], 'status': 'active',
             'selection_rule': 'lowest mean walk-forward RMSE (return space) on train+val folds',
@@ -134,12 +155,15 @@ def main():
                      if k not in ('asset', 'fit_info')},
             'test_naive': {k: test_naive[k] for k in ('RMSE_ret', 'RMSE_usd', 'MAE_usd', 'MAPE_usd')},
             'horizon_days': PREDICTION_HORIZON_DAYS, 'train_end': TRAIN_END, 'val_end': VAL_END,
-            'test_period': [str(data['dates_test'][0].date()), str(data['dates_test'][-1].date())],
+            'data_start': str(data['dates_train'][0].date()), 'n_train': int(len(data['y_train'])), 'n_val': int(len(data['y_val'])),
+            'test_period': [str(data['target_dates_test'][0].date()), str(data['target_dates_test'][-1].date())],
             'params': get_params(best['model'], asset), 'fit_info': infos.get(best['model'], {}),
-            'features': data['columns'],
+            'features': data['columns'], 'target_mean': data['target_mean'], 'target_std': data['target_std'],
         }
         log.info(f"  → served model for {asset}: {best['model']} (CV RMSE_ret {best['RMSE_ret_mean']:.5f} vs naive {naive_cv['RMSE_ret_mean']:.5f})")
+        regime_rows += regime_analysis(asset, data, pred_df, best['model'])
 
+    pd.DataFrame(regime_rows).to_csv(os.path.join(RESULTS_DIR, 'regime_analysis.csv'), index=False)
     pd.DataFrame(cv_rows).to_csv(os.path.join(RESULTS_DIR, 'cv_results.csv'), index=False)
     pd.DataFrame(test_rows).to_csv(os.path.join(RESULTS_DIR, 'final_test_results.csv'), index=False)
     with open(MODEL_STATUS_PATH, 'w') as f:
@@ -170,8 +194,8 @@ def write_markdown(cv_df, test_df, status):
                   "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
         for _, r in test_df[test_df['asset'] == asset].sort_values('RMSE_ret').iterrows():
             b = '**' if r['model'] == s['primary_model'] else ''
-            da = '—' if r['model'] == 'Naive-Zero' else f"{r['DirAcc_pct']:.1f} ({int(r['DirAcc_n'])}, {r['DirAcc_pvalue']:.2f})"
-            dm = '—' if r['model'] == 'Naive-Zero' else f"{r['DM_pvalue']:.2f}"
+            da = '—' if r['model'] == 'Naive' else f"{r['DirAcc_pct']:.1f} ({int(r['DirAcc_n'])}, {r['DirAcc_pvalue']:.2f})"
+            dm = '—' if r['model'] == 'Naive' else f"{r['DM_pvalue']:.2f}"
             lines.append(f"| {b}{r['model']}{b} | {r['MAE_usd']:,.2f} | {r['RMSE_usd']:,.2f} | {r['MAPE_usd']:.2f} | {r['RMSE_ret']:.5f} | "
                          f"{r['R2_ret']:+.3f} | {da} | {dm} | {r['strategy_return_pct']:+.1f} | {r['buy_hold_return_pct']:+.1f} |")
         lines.append("")

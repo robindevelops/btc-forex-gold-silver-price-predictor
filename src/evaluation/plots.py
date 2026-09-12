@@ -29,7 +29,7 @@ from config import ASSETS, RESULTS_DIR, FIGURES_DIR, PROCESSED_DATA_DIR, TRAIN_E
 plt.rcParams.update({'figure.dpi': 130, 'savefig.dpi': 160, 'font.size': 10, 'axes.grid': True,
                      'grid.alpha': 0.3, 'axes.spines.top': False, 'axes.spines.right': False})
 COLORS = {'Bitcoin': '#F7931A', 'Gold': '#C9A227', 'Silver': '#7F8C8D'}
-MODEL_COLORS = {'Naive-Zero': '#9E9E9E', 'Naive-Mean': '#BDBDBD', 'ARIMA': '#FF9800', 'Ridge': '#4CAF50',
+MODEL_COLORS = {'Naive': '#9E9E9E', 'Naive-Mean': '#BDBDBD', 'ARIMA': '#FF9800', 'Ridge': '#4CAF50',
                 'RandomForest': '#795548', 'LightGBM': '#2196F3', 'CatBoost': '#9C27B0', 'GRU': '#00BCD4',
                 'LSTM': '#3F51B5', 'Stacked': '#E91E63'}
 PRED_DIR = os.path.join(RESULTS_DIR, 'predictions')
@@ -75,14 +75,14 @@ def comparison(kind):
         colors = [MODEL_COLORS.get(m, '#607D8B') for m in a['model']]
         ax = axes[0, j]
         ax.barh(a['model'], a[rmse_col], color=colors, xerr=a[err_col] if err_col else None, capsize=3)
-        naive = a.loc[a['model'] == 'Naive-Zero', rmse_col]
+        naive = a.loc[a['model'] == 'Naive', rmse_col]
         if len(naive):
             ax.axvline(float(naive.iloc[0]), color='red', ls='--', lw=1, label='random walk (naive)')
         ax.set_title(f'{asset}: RMSE of next-day log return (lower = better)')
         ax.set_xlim(a[rmse_col].min() * 0.9, a[rmse_col].max() * 1.05)
         ax.legend(loc='lower right', fontsize=8)
         ax = axes[1, j]
-        b = a[a['model'] != 'Naive-Zero'].sort_values(da_col)
+        b = a[a['model'] != 'Naive'].sort_values(da_col)
         ax.barh(b['model'], b[da_col], color=[MODEL_COLORS.get(m, '#607D8B') for m in b['model']])
         ax.axvline(50, color='red', ls='--', lw=1, label='coin flip (50%)')
         ax.set_xlim(30, 70)
@@ -94,7 +94,8 @@ def comparison(kind):
 
 def per_asset(asset, status):
     prefix = get_prefix(asset)
-    pred = pd.read_csv(os.path.join(PRED_DIR, f'{prefix}_test_predictions.csv'), parse_dates=['date'])
+    pred = pd.read_csv(os.path.join(PRED_DIR, f'{prefix}_test_predictions.csv'), parse_dates=['date', 'target_date'])
+    pred['date'] = pred['target_date']   # plot against the day being predicted
     served = status[asset]['primary_model']
     test = pd.read_csv(os.path.join(RESULTS_DIR, 'final_test_results.csv'))
     met = test[(test['asset'] == asset) & (test['model'] == served)].iloc[0]
@@ -122,10 +123,10 @@ def per_asset(asset, status):
     ax = axes[2]
     ax.plot(pred['date'], pred['actual_close'], color='black', lw=1.2, label='actual close')
     ax.plot(pred['date'], pred[f'pred_close_{served}'], color=MODEL_COLORS.get(served, 'C0'), lw=1, ls='--', label=f'{served} predicted close')
-    ax.plot(pred['date'], pred['pred_close_Naive-Zero'], color='#9E9E9E', lw=0.9, ls=':', label='naive (yesterday\'s close)')
+    ax.plot(pred['date'], pred['pred_close_Naive'], color='#9E9E9E', lw=0.9, ls=':', label='naive (yesterday\'s close)')
     ax.set_ylabel('USD')
-    naive_usd = test[(test['asset'] == asset) & (test['model'] == 'Naive-Zero')].iloc[0]['RMSE_usd']
-    ax.set_title(f'Price view (RMSE ${met["RMSE_usd"]:,.2f} vs naive ${naive_usd:,.2f}) — a price line always tracks the actual with a 1-day lag; '
+    naive_usd = test[(test['asset'] == asset) & (test['model'] == 'Naive')].iloc[0]['RMSE_usd']
+    ax.set_title(f'Price view (RMSE \\${met["RMSE_usd"]:,.2f} vs naive \\${naive_usd:,.2f}) — a price line always tracks the actual with a 1-day lag; '
                  f'skill is only visible in the return plots above', fontsize=9)
     ax.legend(loc='upper left', ncol=3)
     save(fig, f'{prefix}_actual_vs_predicted.png')
@@ -201,10 +202,10 @@ def overfitting_gap():
         ax.bar(x + 0.2, a['val'], 0.4, label='validation (out-of-sample)', color='#1565C0')
         ax.set_xticks(x); ax.set_xticklabels(a.index, rotation=30, ha='right')
         # random-walk reference: RMSE of a zero forecast = RMS of the true returns in each split
-        from src.data.preprocessing import build_dataset, unscale_target
+        from src.data.preprocessing import build_dataset
         d = build_dataset(asset)
         for split, ls in (('train', ':'), ('val', '--')):
-            rw = float(np.sqrt(np.mean(unscale_target(d[f'y_{split}'], d['scaler'], d['target_idx']) ** 2)))
+            rw = float(np.sqrt(np.mean(d[f'y_real_{split}'] ** 2)))
             ax.axhline(rw, color='red', ls=ls, lw=1, label=f'random walk ({split})')
         ax.set_title(f'{asset} — RMSE(return): train vs validation'); ax.legend(fontsize=7)
     fig.suptitle('Over-fitting check — compare each model\'s gap with the random-walk gap: the validation period is simply more volatile than training', fontweight='bold', fontsize=10)
