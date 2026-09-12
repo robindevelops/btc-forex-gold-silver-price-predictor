@@ -2,7 +2,7 @@
 
 *Final Year Project (BSCS) — a leakage-audited, walk-forward-validated comparison of statistical, tree-based and recurrent models against the random-walk baseline, with a live prediction dashboard and API.*
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16-orange) ![LightGBM](https://img.shields.io/badge/LightGBM-4.6-green) ![Streamlit](https://img.shields.io/badge/Streamlit-1.50-red) ![Tests](https://img.shields.io/badge/tests-25%20passing-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16-orange) ![LightGBM](https://img.shields.io/badge/LightGBM-4.6-green) ![Streamlit](https://img.shields.io/badge/Streamlit-1.50-red) ![Tests](https://img.shields.io/badge/tests-28%20passing-brightgreen)
 
 ## What the project does
 
@@ -17,6 +17,8 @@ The central research question is honest: *does any model beat the random walk at
 ## Results at a glance
 
 See **`docs/RESULTS.md`** (interpretation) and **`results/FINAL_RESULTS.md`** (auto-generated tables). Figures are in `results/figures/`.
+
+**Final report:** `docs/FYP_Final_Report.pdf` (15 pages) and `docs/Executive_Summary.pdf` (2 pages), both generated from the result files by `python docs/build_report.py`.
 
 ## Project structure
 
@@ -44,7 +46,7 @@ See **`docs/RESULTS.md`** (interpretation) and **`results/FINAL_RESULTS.md`** (a
 │   ├── inference/prediction.py  next-day prediction with context
 │   ├── api/app.py               FastAPI
 │   └── utils/                   metrics (DM test, directional accuracy, backtest), reconstruction, seeds, logging
-├── tests/                     25 tests: look-ahead, target alignment, split, reconstruction, metrics, inference
+├── tests/                     28 test cases: look-ahead, target alignment, split, reconstruction, metrics, inference
 ├── results/                   cv_results.csv · final_test_results.csv · FINAL_RESULTS.md · tuning/ · figures/ · predictions/
 ├── docs/                      METHODOLOGY · FEATURES · RESULTS · LIMITATIONS · VIVA_QA · REPORT_STRUCTURE · FIX_PLAN · AUDIT_SUMMARY
 ├── notebooks/                 companion notebooks (load and display the script outputs)

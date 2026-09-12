@@ -70,7 +70,12 @@ def fmt_pct(x):
 
 # ─────────────────────────────────────────────── sidebar
 st.sidebar.title("AI Prediction Engine")
-asset = st.sidebar.selectbox("Target Asset", ASSETS, index=0)
+# Optional deep-link parameters for demos: ?asset=Gold&run=1
+_qp = st.query_params
+_default_asset = ASSETS.index(_qp.get('asset')) if _qp.get('asset') in ASSETS else 0
+asset = st.sidebar.selectbox("Target Asset", ASSETS, index=_default_asset)
+if _qp.get('run') == '1':
+    st.session_state['run_prediction'] = True
 status_all = load_model_status()
 status = status_all.get(asset, {})
 served = status.get('primary_model', 'LightGBM')
