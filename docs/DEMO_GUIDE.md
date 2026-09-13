@@ -12,15 +12,15 @@ Every number shown is produced by the pipeline from real data; nothing is hard-c
 
 | Step | Where | What to say |
 |---|---|---|
-| 1. Pick an asset | Sidebar → *Target Asset* = Bitcoin | "Daily Yahoo Finance data from 2018; Gold and Silver are exchange days only." |
-| 2. Show the data | Tab **Forecast & Indicators** | Point at the shaded regions: green = training (≤ 2025-09-10), yellow = validation (≤ 2026-02-17), red = **unseen test**. Toggle RSI / MACD / Bollinger to show the feature families. |
-| 3. Show what the model learned | Tab **Model Performance** → feature-importance figure, loss curves | "The tuner chose small, regularised models; volatility and trend features dominate." |
-| 4. **Predict a day** | Tab **Predict a Day (unseen test)** → choose a date → *Generate Prediction* | "The model sees data up to this day only. Predicted close, then the actual close is revealed, the error in $ and %, and whether the direction was right." Point at the diamond/circle on the actual-vs-predicted chart. Try 2–3 dates (a calm day, the June 2026 drop). |
-| 5. All models on that day | same tab, table below | "Ten models were compared; the served one was chosen on validation data, not on this test day." |
+| 1. Pick an asset | Sidebar → *Asset* = Bitcoin (the overview strip under the title already states what is predicted, the served model and its test reliability) | "Daily Yahoo Finance data from 2018; Gold and Silver are exchange days only." |
+| 2. Show the data | Tab **Forecast** | Point at the shaded regions: green = training (≤ 2025-09-10), yellow = validation (≤ 2026-02-17), red = **unseen test**. Use *Chart overlays* (sidebar) to show the RSI / MACD / Bollinger families the features are built from. |
+| 3. Show what the model learned | Tab **Model Performance** → "Which inputs … relies on" chart (tree models) and the *Training diagnostics* expander | "The tuner chose small, regularised models; volatility and trend features dominate." |
+| 4. **Predict a day** | Tab **Predict a Day (unseen test)** → choose a date → *Generate prediction* | "The model sees data up to this day only. Predicted close, then the actual close is revealed, the error in $ and %, and whether the direction was right." Point at the diamond/circle on the actual-vs-predicted chart. Try 2–3 dates (a calm day, the June 2026 drop). |
+| 5. All models on that day | same tab, table below (the sidebar *Model* selector drives every tab) | "Ten models were compared; the served one was chosen on validation data, not on this test day." |
 | 6. Prediction history | Tab **Prediction History** | "Every unseen day, predicted vs actual, error and hit/miss; MAE and hit-rate at the top; downloadable." |
-| 7. How good is it, honestly | Tab **Model Performance** | Walk-forward table (selection), test table (evaluated once), the *Honest reading* box, regime table, experiments expander (E1–E4). |
-| 8. Live forecast | Tab **Forecast & Indicators** → *Run AI Prediction* | Tomorrow's forecast with the ±1 RMSE band and the disclaimer. |
-| 9. Methodology | Tab **Methodology & Models** | Split, features, models, served-model parameters, model inventory. |
+| 7. How good is it, honestly | Tab **Model Performance** | Test table (evaluated once), the *Honest reading* box, the model-vs-random-walk chart, walk-forward table (selection), predicted-vs-actual returns; regimes and experiments in expanders. |
+| 8. Live forecast | Tab **Forecast** → *Run next-day prediction* | Tomorrow's forecast with the ±1 RMSE band and the disclaimer. |
+| 9. Methodology | Tab **Methodology** | Split, features, models, served-model parameters, model inventory. |
 
 ## Figures to put on slides (all in `results/figures/`)
 1. `price_history.png` — the three assets with train/val/test shading (the split).

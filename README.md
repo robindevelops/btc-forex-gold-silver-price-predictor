@@ -25,7 +25,7 @@ See **`docs/RESULTS.md`** (interpretation) and **`results/FINAL_RESULTS.md`** (a
 
 ```
 ├── config.py                  paths, frozen split dates, target, feature policy, default hyper-parameters
-├── app/streamlit_app.py       dashboard (forecast + indicators · performance · methodology)
+├── app/streamlit_app.py       dashboard (forecast · predict-a-day demo · history · performance · methodology)
 ├── src/
 │   ├── data/
 │   │   ├── data_collection.py   Yahoo Finance OHLCV
