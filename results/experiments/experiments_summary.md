@@ -9,13 +9,13 @@
 | Bitcoin | LightGBM | 0.02646 | 0.02619 | -1.01% | 47.5 | 47.5 |
 | Bitcoin | CatBoost | 0.02641 | 0.02613 | -1.07% | 47.5 | 47.5 |
 | Gold | Naive | 0.02035 | 0.02035 | +0.00% | — | — |
-| Gold | Ridge | 0.02018 | 0.02024 | +0.32% | 62.4 | 54.1 |
-| Gold | LightGBM | 0.02023 | 0.02028 | +0.25% | 63.3 | 62.4 |
-| Gold | CatBoost | 0.02017 | 0.02008 | -0.43% | 63.3 | 60.6 |
+| Gold | Ridge | 0.02017 | 0.02025 | +0.37% | 63.3 | 56.9 |
+| Gold | LightGBM | 0.02023 | 0.02028 | +0.28% | 63.3 | 63.3 |
+| Gold | CatBoost | 0.02011 | 0.02007 | -0.18% | 61.5 | 60.6 |
 | Silver | Naive | 0.05536 | 0.05536 | +0.00% | — | — |
-| Silver | Ridge | 0.05524 | 0.05538 | +0.24% | 51.4 | 62.4 |
-| Silver | LightGBM | 0.05529 | 0.05602 | +1.33% | 62.4 | 47.7 |
-| Silver | CatBoost | 0.05553 | 0.05537 | -0.29% | 49.5 | 57.8 |
+| Silver | Ridge | 0.05526 | 0.05543 | +0.32% | 53.2 | 59.6 |
+| Silver | LightGBM | 0.05542 | 0.05583 | +0.74% | 40.4 | 49.5 |
+| Silver | CatBoost | 0.05611 | 0.05532 | -1.40% | 46.8 | 62.4 |
 
 ## E2 — Feature-group ablation (walk-forward CV; positive change = dropping the group hurts)
 
@@ -33,26 +33,26 @@
 | Bitcoin | LightGBM | momentum / trend | -0.02% | 49.7 |
 | Bitcoin | LightGBM | macro | +0.02% | 50.0 |
 | Bitcoin | LightGBM | sentiment / calendar / volume | +0.04% | 49.1 |
-| Gold | Ridge | (none — all features) | +0.00% | 54.7 |
-| Gold | Ridge | return path | +0.03% | 54.1 |
-| Gold | Ridge | volatility state | +0.01% | 54.8 |
-| Gold | Ridge | momentum / trend | +0.02% | 55.9 |
-| Gold | Ridge | macro | +0.01% | 54.8 |
-| Gold | LightGBM | (none — all features) | +0.00% | 53.8 |
-| Gold | LightGBM | return path | +0.45% | 54.0 |
-| Gold | LightGBM | volatility state | -0.04% | 54.2 |
-| Gold | LightGBM | momentum / trend | +0.01% | 54.3 |
-| Gold | LightGBM | macro | +0.09% | 53.7 |
+| Gold | Ridge | (none — all features) | +0.00% | 54.8 |
+| Gold | Ridge | return path | +0.02% | 54.9 |
+| Gold | Ridge | volatility state | +0.01% | 54.6 |
+| Gold | Ridge | momentum / trend | +0.02% | 55.6 |
+| Gold | Ridge | macro | -0.00% | 55.3 |
+| Gold | LightGBM | (none — all features) | +0.00% | 54.4 |
+| Gold | LightGBM | return path | -0.03% | 54.6 |
+| Gold | LightGBM | volatility state | -0.39% | 56.0 |
+| Gold | LightGBM | momentum / trend | -0.36% | 55.1 |
+| Gold | LightGBM | macro | -0.13% | 54.0 |
 | Silver | Ridge | (none — all features) | +0.00% | 53.3 |
-| Silver | Ridge | return path | -0.01% | 53.3 |
-| Silver | Ridge | volatility state | -0.04% | 53.5 |
-| Silver | Ridge | momentum / trend | +0.01% | 52.6 |
-| Silver | Ridge | macro | +0.03% | 53.6 |
-| Silver | LightGBM | (none — all features) | +0.00% | 53.2 |
-| Silver | LightGBM | return path | -0.15% | 52.3 |
-| Silver | LightGBM | volatility state | -0.04% | 51.7 |
-| Silver | LightGBM | momentum / trend | -0.13% | 53.5 |
-| Silver | LightGBM | macro | -0.04% | 53.3 |
+| Silver | Ridge | return path | -0.02% | 53.0 |
+| Silver | Ridge | volatility state | -0.06% | 54.1 |
+| Silver | Ridge | momentum / trend | +0.01% | 53.0 |
+| Silver | Ridge | macro | -0.01% | 53.4 |
+| Silver | LightGBM | (none — all features) | +0.00% | 53.0 |
+| Silver | LightGBM | return path | -0.03% | 52.7 |
+| Silver | LightGBM | volatility state | -0.10% | 52.7 |
+| Silver | LightGBM | momentum / trend | -0.14% | 52.9 |
+| Silver | LightGBM | macro | +0.05% | 53.9 |
 
 ## E3 — Horizon: next-day vs 5-day return (walk-forward CV)
 
@@ -70,24 +70,24 @@
 | Bitcoin | return_5d | CatBoost | +1.40% | -0.048 | 50.8 |
 | Gold | return_1d | Naive | +0.00% | -0.006 | 0.0 |
 | Gold | return_1d | Naive-Mean | -0.12% | -0.004 | 55.8 |
-| Gold | return_1d | Ridge | -0.20% | -0.003 | 54.7 |
-| Gold | return_1d | LightGBM | -0.11% | -0.004 | 53.8 |
-| Gold | return_1d | CatBoost | -0.13% | -0.004 | 56.1 |
+| Gold | return_1d | Ridge | -0.18% | -0.003 | 54.8 |
+| Gold | return_1d | LightGBM | +0.26% | -0.014 | 54.4 |
+| Gold | return_1d | CatBoost | -0.03% | -0.006 | 55.8 |
 | Gold | return_5d | Naive | +0.00% | -0.040 | 41.4 |
 | Gold | return_5d | Naive-Mean | -0.70% | -0.027 | 58.6 |
-| Gold | return_5d | Ridge | -0.80% | -0.025 | 58.3 |
-| Gold | return_5d | LightGBM | -0.60% | -0.030 | 57.0 |
-| Gold | return_5d | CatBoost | -0.78% | -0.027 | 58.9 |
+| Gold | return_5d | Ridge | -0.81% | -0.025 | 57.9 |
+| Gold | return_5d | LightGBM | -0.44% | -0.033 | 56.5 |
+| Gold | return_5d | CatBoost | -1.04% | -0.022 | 60.0 |
 | Silver | return_1d | Naive | +0.00% | -0.002 | 0.0 |
 | Silver | return_1d | Naive-Mean | -0.01% | -0.002 | 53.5 |
-| Silver | return_1d | Ridge | -0.01% | -0.002 | 53.3 |
-| Silver | return_1d | LightGBM | +0.15% | -0.006 | 53.2 |
-| Silver | return_1d | CatBoost | +0.22% | -0.008 | 53.3 |
+| Silver | return_1d | Ridge | +0.05% | -0.003 | 53.3 |
+| Silver | return_1d | LightGBM | +0.09% | -0.005 | 53.0 |
+| Silver | return_1d | CatBoost | +0.01% | -0.002 | 52.5 |
 | Silver | return_5d | Naive | +0.00% | -0.013 | 0.0 |
 | Silver | return_5d | Naive-Mean | -0.09% | -0.012 | 55.5 |
-| Silver | return_5d | Ridge | -0.04% | -0.012 | 54.8 |
-| Silver | return_5d | LightGBM | -0.21% | -0.012 | 54.2 |
-| Silver | return_5d | CatBoost | +0.49% | -0.022 | 54.5 |
+| Silver | return_5d | Ridge | -0.05% | -0.012 | 54.7 |
+| Silver | return_5d | LightGBM | +0.02% | -0.017 | 54.0 |
+| Silver | return_5d | CatBoost | +0.46% | -0.022 | 54.5 |
 
 ## E4 — 22-day realised-volatility target (walk-forward CV)
 
@@ -102,12 +102,12 @@
 | Gold | Naive | 0.3686 | +0.0% | -0.610 | 0.393 | 0.0 |
 | Gold | EWMA | 0.3428 | -7.0% | -0.367 | 0.327 | 61.0 |
 | Gold | Naive-Mean | 0.3863 | +4.8% | -0.563 | 0.682 | 69.4 |
-| Gold | Ridge | 0.3575 | -3.0% | -0.379 | 0.549 | 70.4 |
-| Gold | LightGBM | 0.3680 | -0.2% | -0.450 | 0.548 | 69.3 |
-| Gold | CatBoost | 0.3523 | -4.4% | -0.354 | 0.483 | 69.7 |
+| Gold | Ridge | 0.3577 | -2.9% | -0.381 | 0.549 | 70.3 |
+| Gold | LightGBM | 0.3671 | -0.4% | -0.445 | 0.541 | 69.1 |
+| Gold | CatBoost | 0.3510 | -4.8% | -0.347 | 0.472 | 70.0 |
 | Silver | Naive | 0.3388 | +0.0% | -0.216 | 0.334 | 0.0 |
 | Silver | EWMA | 0.3239 | -4.4% | -0.100 | 0.311 | 59.5 |
 | Silver | Naive-Mean | 0.4466 | +31.8% | -0.747 | 1.342 | 66.2 |
-| Silver | Ridge | 0.4067 | +20.1% | -0.557 | 0.964 | 64.4 |
-| Silver | LightGBM | 0.4538 | +33.9% | -0.856 | 1.299 | 64.4 |
-| Silver | CatBoost | 0.4018 | +18.6% | -0.550 | 0.917 | 65.9 |
+| Silver | Ridge | 0.4071 | +20.2% | -0.560 | 0.967 | 64.4 |
+| Silver | LightGBM | 0.4545 | +34.2% | -0.864 | 1.300 | 64.0 |
+| Silver | CatBoost | 0.4012 | +18.4% | -0.553 | 0.899 | 64.9 |

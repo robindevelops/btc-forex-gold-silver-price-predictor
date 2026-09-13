@@ -13,6 +13,7 @@ import json
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_DATA_DIR = os.path.join(BASE_DIR, 'data', 'raw')
+RAW_LIVE_DIR = os.path.join(BASE_DIR, 'data', 'raw_live')      # live-demo downloads; never touches data/raw
 PROCESSED_DATA_DIR = os.path.join(BASE_DIR, 'data', 'processed')
 MODELS_DIR = os.path.join(BASE_DIR, 'data', 'models')
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
@@ -72,6 +73,18 @@ VAL_END = '2026-02-17'
 # (non-stationary: their test-set values fall outside the training range).
 LEVEL_COLUMNS = ['open', 'high', 'low', 'price', 'volume',
                  'EMA_14', 'EMA_30', 'BB_Mid', 'BB_Upper', 'BB_Lower', 'ATR', 'MACD', 'MACD_Signal']
+
+# Close-time alignment of everything that is not the asset's own close.
+#   * BTC-USD: Yahoo's daily bar closes at 00:00 UTC (19:00/20:00 ET), AFTER every US market close,
+#     so the same day's S&P 500 / VIX / Fear & Greed values are known when P_t is observed.
+#   * GC=F / SI=F: Yahoo's daily close is the 13:25–13:30 ET COMEX settlement (verified against intraday
+#     bars), which is BEFORE the S&P (16:00), VIX (16:15), 10-y yield (~15:00), DXY (17:00) and WTI (14:30)
+#     closes. The latest macro value known at settlement is therefore the PREVIOUS trading day's.
+#     Yahoo's futures High/Low also span the full Globex session (past the settlement), so the features
+#     built from them (hl_range, atr_norm, ADX) are lagged one session for the metals.
+#   Gold's same-day return stays a same-day feature for Silver: both settle in the same 13:25–13:30 window.
+EXTERNAL_SAME_DAY = {'crypto': True, 'commodity': False}
+POST_SETTLEMENT_FEATURES = ['hl_range', 'atr_norm', 'ADX']
 
 # Sequence length for the recurrent models (lookback window in trading days)
 SEQ_LEN = 30

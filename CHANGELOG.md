@@ -1,5 +1,13 @@
 # Changelog
 
+## [Final audit fix] — 2026-09-13 — close-time leak for the metals removed, pipeline re-run
+
+- **Leak found and fixed (critical).** Yahoo's daily close for GC=F / SI=F is the 13:25–13:30 ET COMEX settlement (verified against 5-minute contract bars), so the same-day S&P 500 / VIX / 10-y yield / DXY / WTI returns and the session High/Low used as day-*t* features contained information from inside the target interval. Commodity assets now use the latest external value **strictly before** day *t* (`config.EXTERNAL_SAME_DAY`, `DataCleaner._align_external`) and lag `hl_range` / `atr_norm` / `ADX` one session (`config.POST_SETTLEMENT_FEATURES`); Bitcoin (00:00 UTC bar, after the US close) keeps same-day values. Two new unit tests enforce the rule; the previous results are archived in `results/archive_sameday_macro_leak/`.
+- **Results:** Silver's apparent 62.2 % directional accuracy / DM p = 0.002 disappears (served GRU 55.2 %, p = 0.12; DM p = 0.99). Final answer for all three assets: no model beats the random walk (served models 0.0–0.6 % above naive RMSE, DM p ≥ 0.71). Served models: CatBoost (Bitcoin), CatBoost (Gold), GRU (Silver). Bitcoin's numbers are bit-identical to the previous run.
+- **Live sync** downloads into `data/raw_live/` and refreshes gold for Silver's `gold_return`; the frozen `data/raw/` is never touched.
+- **Reproducibility:** `make preprocess` / `make collect-data` work directly (missing `sys.path` bootstrap); Keras phase A and phase B are now the same procedure (early stopping only); Sharpe annualised with 365 days for Bitcoin; the demo look-ahead test now perturbs every future row.
+- Docs, README, viva notes, demo guide, both PDFs and the notebooks regenerated from the new results. Tests: 34 cases.
+
 ## [Improvement phase] — 2026-09-12 — more data, measured improvements, demonstration mode
 
 - **Data:** full Yahoo Finance history 2018-01 → 2026-09-12 (2.9× more training data; test window extended to 2026-09-12). 3-year raw files and results archived (`data/raw_3y_backup/`, `results/archive_3y_final/`).
@@ -8,7 +16,7 @@
 - **Experiments** (`src/experiments/`): E1 data size, E2 feature-group ablation, E3 horizon, E4 volatility target — validation only; `before_after.py` compares the two systems on identical unseen days.
 - **Evaluation:** prediction history with per-day error and direction hit; regime analysis (volatility terciles, trend, up/down days); volatility metrics (QLIKE, log-RMSE).
 - **Dashboard:** *Predict a Day (unseen test)* — pick any test day, predict the next close from data up to that day, reveal the actual, error, hit/miss, highlighted on the actual-vs-predicted chart, all models on that day; *Prediction History* tab with MAE / hit-rate KPIs and CSV download; regime table and experiment tables on the Performance tab; `?asset=…&run=1` deep links.
-- **Results:** Gold −1.9 % and Silver −2.8 % return-RMSE on identical unseen days; Silver's served LightGBM is significantly better than the random walk on the 2026 test window (62.2 % direction, p = 0.002; DM p = 0.002); Bitcoin unchanged. See `docs/RESULTS.md`.
+- **Results (superseded — see the final-audit entry above):** this phase reported Gold −1.9 % and Silver −2.8 % return-RMSE on identical unseen days and a significant Silver result (62.2 % direction); the Silver figures were caused by the close-time leak fixed on 2026-09-13.
 - Tests: 31 cases (task targets, embargo, standardisation round-trip, predict-for-date look-ahead check).
 
 ## [FYP release] — 2026-09-12 — Audit → fix → validated pipeline

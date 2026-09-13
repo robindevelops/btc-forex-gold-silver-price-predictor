@@ -13,10 +13,14 @@ import argparse
 import pandas as pd
 import yfinance as yf
 
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from config import RAW_DATA_DIR, ASSET_CONFIG, DATA_START_DATE
 
 
-def fetch_asset(asset_name, start=DATA_START_DATE):
+def fetch_asset(asset_name, start=DATA_START_DATE, out_dir=RAW_DATA_DIR):
+    """Download one asset's daily OHLCV into `out_dir` (data/raw by default; data/raw_live for demo refreshes)."""
     cfg = ASSET_CONFIG[asset_name]
     print(f"\nFetching {asset_name} ({cfg['ticker']}) from {start}...")
     try:
@@ -31,7 +35,8 @@ def fetch_asset(asset_name, start=DATA_START_DATE):
     df.columns = ['timestamp', 'open', 'high', 'low', 'price', 'volume']
     df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
     df = df.dropna(subset=['price'])
-    path = os.path.join(RAW_DATA_DIR, cfg['filename'])
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, cfg['filename'])
     df.to_csv(path, index=False)
     print(f"  {len(df)} rows, {df['timestamp'].min().date()} → {df['timestamp'].max().date()} saved to {path}")
     return df

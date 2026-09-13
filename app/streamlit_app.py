@@ -374,11 +374,18 @@ with tab2:
                              'Buy&Hold %': t['buy_hold_return_pct'].round(1)})
         st.dataframe(show, use_container_width=True, hide_index=True)
         naive = t[t['model'] == 'Naive'].iloc[0]; best = t[t['model'] == served].iloc[0]
-        beats = best['RMSE_ret'] < naive['RMSE_ret']
+        rel = (best['RMSE_ret'] / naive['RMSE_ret'] - 1) * 100
+        if best['DM_pvalue'] < 0.05 and rel < 0:
+            verdict = f"it beats the naive baseline on magnitude ({rel:+.2f}%, Diebold–Mariano p = {best['DM_pvalue']:.2f}, significant at 5%)"
+        elif abs(rel) < 0.05:
+            verdict = f"it is indistinguishable from the naive baseline on magnitude (Diebold–Mariano p = {best['DM_pvalue']:.2f})"
+        else:
+            verdict = (f"it is {abs(rel):.2f}% {'below' if rel < 0 else 'above'} the naive baseline on magnitude — "
+                       f"not a significant difference (Diebold–Mariano p = {best['DM_pvalue']:.2f})")
+        da_sig = 'significant' if best['DirAcc_pvalue'] < 0.05 else 'not significant'
         st.info(f"**Honest reading:** on the test set the served model's RMSE(return) is {best['RMSE_ret']:.5f} vs {naive['RMSE_ret']:.5f} for the "
-                f"random-walk forecast — it {'does' if beats else 'does not'} beat the naive baseline on magnitude"
-                f"{' (Diebold–Mariano p = %.2f, %s)' % (best['DM_pvalue'], 'significant' if best['DM_pvalue'] < 0.05 else 'not significant at 5%')}. "
-                f"Directional accuracy is {best['DirAcc_pct']:.1f}% on {int(best['DirAcc_n'])} non-flat days (binomial p = {best['DirAcc_pvalue']:.2f}). "
+                f"random-walk forecast — {verdict}. "
+                f"Directional accuracy is {best['DirAcc_pct']:.1f}% on {int(best['DirAcc_n'])} non-flat days (binomial p = {best['DirAcc_pvalue']:.2f}, {da_sig}). "
                 "R² on price levels is intentionally not shown: a random walk scores ≈0.95 there.")
         reg = load_csv('regime_analysis.csv')
         if reg is not None:
@@ -419,6 +426,7 @@ walk-forward validation inside train+val; the test set is evaluated once by `src
 RSI, ADX, ROC, MACD/price, price/EMA ratios, Bollinger %B and width, ATR/price, high–low range,
 macro daily returns (S&P 500, VIX{', DXY, oil, 10-year yield' if asset != 'Bitcoin' else ', Fear & Greed, day-of-week, volume change'}){', gold return' if asset == 'Silver' else ''}.
 Raw price levels are shown on charts but never fed to a model.
+{'**Close-time rule.** Gold/Silver close at the 13:30 ET COMEX settlement, before the US equity/rates/FX closes, so the macro returns and the High/Low-based features (hl_range, ATR/price, ADX) are the *previous* session' + chr(39) + 's values — only information known when the price is fixed is used.' if asset != 'Bitcoin' else '**Close-time rule.** BTC-USD closes at 00:00 UTC, after every US market close, so same-day macro values are known at the close.'}
 
 **Models compared.** Naive zero-return (random walk), historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM, and a stacked ensemble.
 Models needing a stopping rule (trees / epochs) use validation for that in phase 1 and are refit on train+val in phase 2.

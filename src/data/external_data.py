@@ -51,12 +51,13 @@ EXTERNAL_SOURCES = {
 }
 
 
-def fetch_yfinance_external(source_name):
+def fetch_yfinance_external(source_name, out_dir=RAW_DATA_DIR):
     """
-    Fetches external data from yfinance and saves to data/raw/.
+    Fetches external data from yfinance and saves to `out_dir` (data/raw by default).
     
     Args:
         source_name: Key in EXTERNAL_SOURCES dict (e.g. 'DXY', 'CrudeOil')
+        out_dir: destination directory (data/raw_live for live-demo refreshes)
     
     Returns:
         DataFrame with columns ['timestamp', 'price']
@@ -79,7 +80,8 @@ def fetch_yfinance_external(source_name):
     df.columns = ['timestamp', 'price']
     df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
     
-    filepath = os.path.join(RAW_DATA_DIR, config['filename'])
+    os.makedirs(out_dir, exist_ok=True)
+    filepath = os.path.join(out_dir, config['filename'])
     df.to_csv(filepath, index=False)
     print(f"  Saved {len(df)} rows to {filepath}")
     print(f"  Date range: {df['timestamp'].min().date()} → {df['timestamp'].max().date()}")
@@ -88,7 +90,7 @@ def fetch_yfinance_external(source_name):
     return df
 
 
-def fetch_fear_greed_index():
+def fetch_fear_greed_index(out_dir=RAW_DATA_DIR):
     """
     Fetches the Bitcoin Fear & Greed Index from alternative.me (free, no API key).
     
@@ -126,7 +128,8 @@ def fetch_fear_greed_index():
         df = pd.DataFrame(records)
         df = df.sort_values('timestamp').reset_index(drop=True)
         
-        filepath = os.path.join(RAW_DATA_DIR, 'fear_greed_data.csv')
+        os.makedirs(out_dir, exist_ok=True)
+        filepath = os.path.join(out_dir, 'fear_greed_data.csv')
         df.to_csv(filepath, index=False)
         print(f"  Saved {len(df)} rows to {filepath}")
         print(f"  Date range: {df['timestamp'].min().date()} → {df['timestamp'].max().date()}")
@@ -140,8 +143,8 @@ def fetch_fear_greed_index():
         return pd.DataFrame()
 
 
-def fetch_all_external_data():
-    """Fetches all external data sources and saves to data/raw/."""
+def fetch_all_external_data(out_dir=RAW_DATA_DIR):
+    """Fetches all external data sources and saves to `out_dir` (data/raw by default)."""
     print("=" * 50)
     print("  FETCHING EXTERNAL DATA (Week 4)")
     print("=" * 50)
@@ -150,10 +153,10 @@ def fetch_all_external_data():
     
     # yfinance sources (DXY, Crude Oil)
     for source_name in EXTERNAL_SOURCES:
-        results[source_name] = fetch_yfinance_external(source_name)
+        results[source_name] = fetch_yfinance_external(source_name, out_dir)
     
     # Fear & Greed Index
-    results['FearGreed'] = fetch_fear_greed_index()
+    results['FearGreed'] = fetch_fear_greed_index(out_dir)
     
     print("\n" + "=" * 50)
     print("  External data collection complete.")

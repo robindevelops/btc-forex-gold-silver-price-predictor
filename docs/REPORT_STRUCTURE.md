@@ -38,6 +38,7 @@ Each bullet names the artefact in this repository that supplies the content.
 * Experiment 3 — tuned models under walk-forward validation: `results/cv_results.csv`, `figures/model_comparison_cv.png`, tuning curves in `results/tuning/*.csv`.
 * Experiment 4 — untouched test set: `results/final_test_results.csv`, `figures/model_comparison_test.png`, per-asset `figures/<asset>_actual_vs_predicted.png`, `_residuals.png`, `_strategy.png`.
 * Experiment 5 — analysis: feature importance (`figures/<asset>_feature_importance.png`), over-fitting gap (`figures/overfitting_gap.png`), loss curves, stacked-ensemble weights (`results/stacking/*.json`).
+* Experiment 6 — the close-time leak found by the final audit: `results/archive_sameday_macro_leak/` (same-day macro features gave Silver 62 % directional accuracy) vs the corrected results in `results/`; `docs/RESULTS.md §2`. Present it as a finding: a few hours of look-ahead is enough to manufacture a "significant" result on daily data.
 * Final table: `docs/RESULTS.md`.
 
 ## Chapter 6 — Discussion

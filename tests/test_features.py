@@ -1,4 +1,5 @@
 """Feature-engineering guarantees: correctness of indicators and NO look-ahead."""
+import os
 import numpy as np
 import pandas as pd
 import pytest
@@ -42,14 +43,53 @@ def test_lagged_returns_are_strictly_past(synthetic_price_data):
         assert np.allclose(c.df[f'return_{k}d'].iloc[k:], lr.shift(k).iloc[k:])
 
 
-def test_no_lookahead_in_any_feature(synthetic_price_data):
-    """Changing the LAST observation must not change any feature at an earlier date."""
-    a = _cleaner(synthetic_price_data); a.clean_data()
+@pytest.mark.parametrize('asset', ['Bitcoin', 'Gold'])
+def test_no_lookahead_in_any_feature(synthetic_price_data, asset):
+    """Changing the LAST observation must not change any feature at an earlier date (crypto and futures paths)."""
+    a = _cleaner(synthetic_price_data, asset); a.clean_data()
     df2 = synthetic_price_data.copy()
     df2.loc[df2.index[-1], ['open', 'high', 'low', 'price', 'volume']] *= [1.5, 1.7, 1.2, 1.5, 3.0]
-    b = _cleaner(df2); b.clean_data()
+    b = _cleaner(df2, asset); b.clean_data()
     common = a.df.index[:-1]
     pd.testing.assert_frame_equal(a.df.loc[common], b.df.loc[common], check_exact=False, rtol=1e-9)
+
+
+def _macro_return(fname):
+    from config import RAW_DATA_DIR
+    s = pd.read_csv(os.path.join(RAW_DATA_DIR, fname), parse_dates=['timestamp']).set_index('timestamp')['price']
+    s = s[~s.index.duplicated()].sort_index()
+    return np.log(s / s.shift(1))
+
+
+def test_commodity_external_features_are_previous_day_values(synthetic_price_data):
+    """
+    GC=F / SI=F close at the 13:30 ET settlement, BEFORE the S&P/VIX/DXY/TNX/WTI closes: at row t a metal
+    may only see the macro return of the latest external date STRICTLY before t. Bitcoin (00:00 UTC close,
+    after the US close) may see the same day's value.
+    """
+    sp = _macro_return('sp500_data.csv')
+    g = _cleaner(synthetic_price_data, 'Gold'); g.clean_data()
+    for t in g.df.index[::37]:
+        prior = sp[sp.index < t]
+        assert np.isclose(g.df.loc[t, 'sp500_return'], prior.iloc[-1]), t          # strictly earlier date
+    same_day = [t for t in g.df.index if t in sp.index]
+    assert not np.allclose(g.df.loc[same_day, 'sp500_return'], sp.loc[same_day])  # and NOT the same-day value
+    b = _cleaner(synthetic_price_data, 'Bitcoin'); b.clean_data()
+    for t in b.df.index[::37]:
+        same_or_prior = sp[sp.index <= t]
+        assert np.isclose(b.df.loc[t, 'sp500_return'], same_or_prior.iloc[-1]), t
+
+
+def test_commodity_high_low_features_are_lagged_one_session(synthetic_price_data):
+    """Yahoo's futures High/Low span the session past the settlement: hl_range/atr_norm/ADX are lagged for metals only."""
+    from config import POST_SETTLEMENT_FEATURES
+    g = _cleaner(synthetic_price_data, 'Gold'); g.clean_data()
+    raw_hl = ((g.df['high'] - g.df['low']) / g.df['price'])
+    assert np.allclose(g.df['hl_range'].iloc[1:], raw_hl.shift(1).iloc[1:])          # previous session's range
+    assert not np.allclose(g.df['hl_range'], raw_hl)
+    assert set(POST_SETTLEMENT_FEATURES) <= set(g.df.columns)
+    b = _cleaner(synthetic_price_data, 'Bitcoin'); b.clean_data()
+    assert np.allclose(b.df['hl_range'], (b.df['high'] - b.df['low']) / b.df['price'])   # same-day for crypto
 
 
 def test_commodities_keep_trading_calendar():

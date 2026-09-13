@@ -26,6 +26,12 @@ Full audit was delivered in conversation; this is the condensed record for the r
 | README claimed PatchTST, TFT, Williams %R, CCI, Stochastic, "30+ indicators" | none existed | accurate docs |
 | Makefile / retrain / CI referenced non-existent scripts; 4/31 tests failed | not reproducible | rewritten; 25/25 tests pass |
 
+## Final audit (after the improvement phase) — one more leak
+| Problem | Effect | Fix |
+|---|---|---|
+| Close-time misalignment for the metals: Yahoo's GC=F/SI=F daily close is the 13:30 ET **settlement** (verified against intraday bars), but same-day S&P 500 / VIX / 10-y yield / DXY / WTI returns (fixed 14:30–17:00 ET) and the session High/Low were used as day-*t* features | 1–3.5 hours of the target interval leaked into the features; Silver's served LightGBM showed 62 % directional accuracy (DM p = 0.002) that vanished when the macro features were lagged (→ ≈ 53 %); Bitcoin unaffected (its bar closes after the US close) | previous-day macro returns for commodities, High/Low-based features lagged one session, both unit-tested; full pipeline re-run; docs and report corrected (`docs/RESULTS.md §2`) |
+| Live sync overwrote frozen raw macro files; `make preprocess` failed outside `retrain.py`; demo look-ahead test did not perturb anything; Keras phase A/B used different procedures; BTC Sharpe annualised with 252 | reproducibility / test strength / minor metric | `data/raw_live/`; `sys.path` bootstrap; real perturbation test; identical phases; 365 periods for crypto |
+
 ## Independent re-evaluation of the OLD models (test set, bug corrected), for the record
 | Asset | Model | RMSE (ret) | R² (ret) | Dir. Acc | RMSE ($) |
 |---|---|---:|---:|---:|---:|

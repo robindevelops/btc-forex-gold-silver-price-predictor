@@ -13,15 +13,17 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from config import ASSETS, RESULTS_DIR, EXPERIMENTS_DIR, get_prefix, load_model_status
+from config import ASSETS, ASSET_CONFIG, RESULTS_DIR, EXPERIMENTS_DIR, get_prefix, load_model_status
 from src.utils.metrics import evaluate_forecast
+
+PPY = {a: (365 if ASSET_CONFIG[a]['type'] == 'crypto' else 252) for a in ASSETS}
 
 OLD = os.path.join(RESULTS_DIR, 'archive_3y_final')
 
 
-def metrics_from(pred_df, model, date_col):
+def metrics_from(pred_df, model, asset):
     r = pred_df[f'pred_return_{model}'].values
-    return evaluate_forecast(pred_df['actual_return'].values, r, pred_df['prev_close'].values)
+    return evaluate_forecast(pred_df['actual_return'].values, r, pred_df['prev_close'].values, periods_per_year=PPY[asset])
 
 
 def main():
@@ -42,9 +44,9 @@ def main():
         for label, df, model in (('naive (old data)', o, 'Naive'), ('before (3 y data)', o, m_old),
                                  ('naive (new data)', n, 'Naive'), ('after (full history)', n, m_new)):
             if label.startswith('naive'):
-                met = evaluate_forecast(df['actual_return'].values, np.zeros(len(df)), df['prev_close'].values)
+                met = evaluate_forecast(df['actual_return'].values, np.zeros(len(df)), df['prev_close'].values, periods_per_year=PPY[asset])
             else:
-                met = metrics_from(df, model, 'date')
+                met = metrics_from(df, model, asset)
             rows.append({'asset': asset, 'system': label, 'model': model, 'n_days': len(df), 'max_price_revision_pct': rev,
                          'period': f"{common[0].date()} → {common[-1].date()}",
                          'MAE_usd': met['MAE_usd'], 'RMSE_usd': met['RMSE_usd'], 'MAPE_usd': met['MAPE_usd'],

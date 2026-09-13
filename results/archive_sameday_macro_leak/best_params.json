@@ -1,0 +1,127 @@
+{
+  "return_1d": {
+    "Bitcoin": {
+      "Ridge": {
+        "alpha": 100.0
+      },
+      "RandomForest": {
+        "n_estimators": 300,
+        "max_depth": 3,
+        "min_samples_leaf": 30
+      },
+      "LightGBM": {
+        "n_estimators": 600,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "min_child_samples": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 0.0
+      },
+      "CatBoost": {
+        "iterations": 800,
+        "learning_rate": 0.03,
+        "depth": 7,
+        "l2_leaf_reg": 3.0
+      },
+      "GRU": {
+        "units": 32,
+        "dropout": 0.4,
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "epochs": 40,
+        "patience": 6
+      },
+      "LSTM": {
+        "units": 32,
+        "dropout": 0.4,
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "epochs": 40,
+        "patience": 6
+      }
+    },
+    "Gold": {
+      "Ridge": {
+        "alpha": 10.0
+      },
+      "RandomForest": {
+        "n_estimators": 300,
+        "max_depth": 3,
+        "min_samples_leaf": 10
+      },
+      "LightGBM": {
+        "n_estimators": 600,
+        "learning_rate": 0.03,
+        "num_leaves": 15,
+        "min_child_samples": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 0.0
+      },
+      "CatBoost": {
+        "iterations": 800,
+        "learning_rate": 0.01,
+        "depth": 5,
+        "l2_leaf_reg": 3.0
+      },
+      "GRU": {
+        "units": 32,
+        "dropout": 0.4,
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "epochs": 40,
+        "patience": 6
+      },
+      "LSTM": {
+        "units": 32,
+        "dropout": 0.4,
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "epochs": 40,
+        "patience": 6
+      }
+    },
+    "Silver": {
+      "Ridge": {
+        "alpha": 100.0
+      },
+      "RandomForest": {
+        "n_estimators": 300,
+        "max_depth": 3,
+        "min_samples_leaf": 30
+      },
+      "LightGBM": {
+        "n_estimators": 600,
+        "learning_rate": 0.03,
+        "num_leaves": 15,
+        "min_child_samples": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 0.0
+      },
+      "CatBoost": {
+        "iterations": 800,
+        "learning_rate": 0.03,
+        "depth": 7,
+        "l2_leaf_reg": 3.0
+      },
+      "GRU": {
+        "units": 32,
+        "dropout": 0.4,
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "epochs": 40,
+        "patience": 6
+      },
+      "LSTM": {
+        "units": 32,
+        "dropout": 0.2,
+        "learning_rate": 0.001,
+        "batch_size": 64,
+        "epochs": 40,
+        "patience": 6
+      }
+    }
+  }
+}

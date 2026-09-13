@@ -274,7 +274,7 @@ class _KerasSequenceModel(BaseModel):
                             learning_rate=self.params.get('learning_rate', 1e-3))
 
     def fit(self, Xseq_tr, Xt_tr, y_tr, Xseq_val=None, Xt_val=None, y_val=None, final=False):
-        from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+        from tensorflow.keras.callbacks import EarlyStopping
         set_all_seeds(42)
         bs = self.params.get('batch_size', 32)
         epochs = self.params.get('epochs', 80)
@@ -283,8 +283,9 @@ class _KerasSequenceModel(BaseModel):
 
         if Xseq_val is not None and y_val is not None:
             m1 = self._build(seq_len, n_features)
-            cbs = [EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True),
-                   ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-5)]
+            # Only early stopping: phase B has no validation signal, so phase A must not use any other
+            # validation-driven schedule (an LR schedule here would make the two fits different procedures).
+            cbs = [EarlyStopping(monitor='val_loss', patience=patience, restore_best_weights=True)]
             h = m1.fit(Xseq_tr, y_tr, validation_data=(Xseq_val, y_val), epochs=epochs,
                        batch_size=bs, callbacks=cbs, verbose=0, shuffle=False)
             self.history = {k: [float(x) for x in v] for k, v in h.history.items()}

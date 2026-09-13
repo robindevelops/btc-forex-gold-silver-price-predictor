@@ -22,6 +22,7 @@ __pycache__/
 # Project specific
 data/raw/*
 !data/raw/.gitkeep
+data/raw_live/
 data/processed/*
 !data/processed/.gitkeep
 data/models/*

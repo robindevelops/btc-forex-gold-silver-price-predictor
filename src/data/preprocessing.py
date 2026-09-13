@@ -2,7 +2,8 @@
 Data cleaning, feature engineering, chronological split and scaling.
 
 Design rules (see docs/METHODOLOGY.md):
-  * Every feature at row t uses only information available at the close of day t.
+  * Every feature at row t uses only information available at the moment P_t is observed
+    (BTC: 00:00 UTC bar close; GC=F/SI=F: the 13:30 ET COMEX settlement — see config.EXTERNAL_SAME_DAY).
   * The target is the NEXT row's log return (created in `create_sequences`), never a feature.
   * Assets keep their own trading calendar (no synthetic weekend rows for futures).
   * Only stationary features are model inputs; raw price levels are kept for charts.
@@ -14,20 +15,28 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from config import (RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG, LEVEL_COLUMNS, TARGET_COL,
-                    TRAIN_END, VAL_END, SEQ_LEN, TASKS, DEFAULT_TASK, get_prefix)
+                    TRAIN_END, VAL_END, SEQ_LEN, TASKS, DEFAULT_TASK, EXTERNAL_SAME_DAY, POST_SETTLEMENT_FEATURES,
+                    get_prefix)
 
 
 class DataCleaner:
-    """Loads a raw OHLCV CSV, cleans it and adds features."""
+    """Loads a raw OHLCV CSV, cleans it and adds features.
 
-    def __init__(self, asset_name):
+    `raw_dir` is where the asset's OHLCV and the external series are read from (data/raw for the frozen
+    evaluation data; data/raw_live for live-demo refreshes, so the frozen files are never overwritten)."""
+
+    def __init__(self, asset_name, raw_dir=RAW_DATA_DIR):
         self.asset_name = asset_name
         self.config = ASSET_CONFIG.get(asset_name)
         if not self.config:
             raise ValueError(f"Asset {asset_name} not found in configuration.")
         self.prefix = get_prefix(asset_name)
-        self.raw_path = os.path.join(RAW_DATA_DIR, self.config['filename'])
+        self.raw_dir = raw_dir
+        self.raw_path = os.path.join(raw_dir, self.config['filename'])
         self.processed_path = os.path.join(PROCESSED_DATA_DIR, f'{self.prefix}_features.csv')
         self.df = None
         self.scaler = None
@@ -124,10 +133,41 @@ class DataCleaner:
         v = self.df['volume'].replace(0, np.nan)
         self.df['log_volume_change'] = np.log(v / v.shift(1)).clip(-3, 3).fillna(0)
 
+    def lag_post_settlement_features(self):
+        """
+        Futures only. Yahoo's daily High/Low for GC=F / SI=F cover the whole Globex session (until 17:00 ET),
+        but the Close is the 13:30 ET settlement. Features built from the day's High/Low would therefore
+        contain up to 3.5 hours of trading that happens AFTER P_t is fixed — inside the target interval.
+        They are lagged one session so that row t only uses the previous session's range.
+        """
+        for c in POST_SETTLEMENT_FEATURES:
+            self.df[c] = self.df[c].shift(1)
+
+    def _align_external(self, series):
+        """
+        Align an external daily series onto THIS asset's calendar using only values known when P_t is
+        observed. Crypto (00:00 UTC close, after the US close): the same day's value, forward-filled.
+        Commodities (13:30 ET settlement, before the US close): the value from the latest external date
+        STRICTLY before day t.
+        """
+        if EXTERNAL_SAME_DAY[self.config['type']]:
+            return series.reindex(self.df.index, method='ffill')
+        pos = series.index.searchsorted(self.df.index, side='left') - 1      # last external date < t
+        vals = np.where(pos >= 0, series.values[np.clip(pos, 0, None)], np.nan)
+        return pd.Series(vals, index=self.df.index)
+
+    def _read_external(self, fname, col='price'):
+        path = os.path.join(self.raw_dir, fname)
+        if not os.path.exists(path):
+            return None
+        s = pd.read_csv(path, parse_dates=['timestamp']).set_index('timestamp')[col]
+        return s[~s.index.duplicated()].sort_index()
+
     def add_external_features(self):
         """
-        Merge external macro/sentiment series as same-day log returns, aligned onto
-        THIS asset's trading calendar with a forward fill (only past values are pulled).
+        Merge external macro/sentiment series as daily log returns computed on THEIR OWN calendar and
+        aligned onto this asset's calendar by `_align_external` (same-day for crypto, previous-day for
+        futures — see config.EXTERNAL_SAME_DAY). Only past values are ever pulled forward.
         """
         asset_type = self.config['type']
         macro = []
@@ -136,28 +176,23 @@ class DataCleaner:
         macro += [('sp500_data.csv', 'sp500'), ('vix_data.csv', 'vix')]
 
         for fname, col in macro:
-            path = os.path.join(RAW_DATA_DIR, fname)
-            if not os.path.exists(path):
+            ext = self._read_external(fname)
+            if ext is None:
                 print(f"WARNING: {fname} not found, skipping {col}_return")
                 continue
-            ext = pd.read_csv(path, parse_dates=['timestamp']).set_index('timestamp')['price']
-            ext = ext[~ext.index.duplicated()].sort_index()
-            ext_ret = np.log(ext / ext.shift(1))               # computed on ITS OWN calendar
-            self.df[f'{col}_return'] = ext_ret.reindex(self.df.index, method='ffill').fillna(0)
+            self.df[f'{col}_return'] = self._align_external(np.log(ext / ext.shift(1))).fillna(0)
 
         if asset_type == 'crypto':
-            path = os.path.join(RAW_DATA_DIR, 'fear_greed_data.csv')
-            if os.path.exists(path):
-                fg = pd.read_csv(path, parse_dates=['timestamp']).set_index('timestamp')['fear_greed']
-                fg = fg[~fg.index.duplicated()].sort_index()
-                self.df['fear_greed'] = fg.reindex(self.df.index, method='ffill').fillna(50)
+            # published at 00:00 UTC for the day, i.e. before the BTC bar for that day closes
+            fg = self._read_external('fear_greed_data.csv', 'fear_greed')
+            if fg is not None:
+                self.df['fear_greed'] = self._align_external(fg).fillna(50)
 
         if self.asset_name == 'Silver':
-            # Gold and silver settle at the same time; gold's same-day return is known at silver's close.
-            path = os.path.join(RAW_DATA_DIR, 'gold_data.csv')
-            if os.path.exists(path):
-                g = pd.read_csv(path, parse_dates=['timestamp']).set_index('timestamp')['price']
-                g = g[~g.index.duplicated()].sort_index()
+            # Gold (13:30 ET) and silver (13:25 ET) settle in the same window: gold's same-day return is known
+            # at silver's settlement (the 5-minute difference is negligible at a daily horizon).
+            g = self._read_external('gold_data.csv')
+            if g is not None:
                 self.df['gold_return'] = np.log(g / g.shift(1)).reindex(self.df.index, method='ffill').fillna(0)
 
     # ------------------------------------------------------------ pipeline
@@ -193,6 +228,8 @@ class DataCleaner:
         if self.config['type'] == 'crypto':
             self.add_calendar_features()
             self.add_volume_change()
+        else:
+            self.lag_post_settlement_features()
         self.add_external_features()
 
         self.df = self.df.dropna()
@@ -341,7 +378,8 @@ def build_dataset(asset_name, seq_len=SEQ_LEN, task=DEFAULT_TASK, train_start=No
 
     naive_feat = TASKS[task]['naive_feature']
     out = {'columns': list(full.columns), 'features': features, 'scaler': scaler, 'seq_len': seq_len,
-           'task': task, 'horizon': h, 'kind': TASKS[task]['kind'], 'inv': inv, 'fwd': fwd, 'target_mean': mu, 'target_std': sd}
+           'task': task, 'horizon': h, 'kind': TASKS[task]['kind'], 'inv': inv, 'fwd': fwd, 'target_mean': mu, 'target_std': sd,
+           'periods_per_year': 365 if ASSET_CONFIG[asset_name]['type'] == 'crypto' else 252}
     for split, m in masks.items():
         d = dates_t[m]
         out[f'X_{split}'] = X[m]

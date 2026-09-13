@@ -3,6 +3,8 @@
 A 10-minute walkthrough for evaluators. Start the dashboard with `make serve` (http://localhost:8501).
 Every number shown is produced by the pipeline from real data; nothing is hard-coded.
 
+**Before demo day:** `data/` (raw, processed, models) is git-ignored. Run the demo on the machine that ran the pipeline, or copy `data/` and `results/` alongside the repository — otherwise run `make preprocess train stack evaluate` first (≈ 5 min without tuning, using the committed `results/tuning/best_params.json`).
+
 ## The story in one sentence
 > *Historical data → features → model training on the past → prediction on days the model never saw → actual value → error → evaluation.*
 
@@ -34,9 +36,10 @@ Every number shown is produced by the pipeline from real data; nothing is hard-c
 | Question | Answer (and evidence) |
 |---|---|
 | Did you train on the test period? | No — frozen chronological split; the red region is never used for training, validation or selection (`config.py`, tests). |
-| How do we know it isn't memorising? | *Predict a Day* on unseen dates; `overfitting_gap.png`; the served models are tiny (depth-3 trees, ≤ 100 iterations, α = 100). |
+| How do we know it isn't memorising? | *Predict a Day* on unseen dates; `overfitting_gap.png`; the served models are small (CatBoost depth 7 / 50 rounds for Bitcoin, depth 3 / 606 rounds at learning-rate 0.01 for Gold, a 32-unit GRU stopped after 9 epochs for Silver) and their validation gap equals the random walk's own gap. |
 | What does the model use? | Methodology tab feature list; `docs/FEATURES.md`; feature-importance figure. |
-| How accurate is it? | Prediction-history KPIs (MAE %, hit-rate) and the test table: MAE ≈ 1.4–2.7 % of price, direction ≈ 48–55 %, not significantly better than the random walk (DM p-values). |
-| Why this model? | Lowest walk-forward RMSE on train+val folds (Model Performance tab, first table); alternatives are within 1 %. |
+| How accurate is it? | Prediction-history KPIs (MAE %, hit-rate) and the test table: MAE ≈ 1.3–2.5 % of price — the same as the random walk's, because that is the asset's daily volatility — direction ≈ 47–55 %, not significantly better than the random walk (DM p-values). Never quote MAPE as "accuracy": 100 − MAPE is what a zero forecast scores too. |
+| Didn't an earlier version show 62 % for Silver? | Yes — and the final audit traced it to a close-time leak (futures settle 13:30 ET, the macro closes are later). Fixing it removed the effect (`docs/RESULTS.md §2`). Finding and closing that leak *is* a result. |
+| Why this model? | Lowest walk-forward RMSE on train+val folds (Model Performance tab, first table); all alternatives are within 0.5 %, so say plainly that the ranking is not decisive. |
 | Can it beat the market? | No — and the system says so on every forecast. The contribution is the validated end-to-end pipeline and the honest evaluation. |
 | What did more data / other features change? | Experiments expander: E1 (data size), E2 (ablation), E3 (horizon), E4 (volatility). |

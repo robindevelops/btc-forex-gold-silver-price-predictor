@@ -90,12 +90,13 @@ def strategy_backtest(true_ret, pred_ret, cost_bps=10.0, periods_per_year=252):
             'time_in_market_pct': float(pos.mean() * 100)}
 
 
-def evaluate_forecast(true_ret, pred_ret, prev_close, naive_pred_ret=None):
+def evaluate_forecast(true_ret, pred_ret, prev_close, naive_pred_ret=None, periods_per_year=252):
     """
     Full metric set for one model on one split.
         true_ret / pred_ret : real (unscaled) log returns of day t+1
         prev_close          : close of day t (USD)
         naive_pred_ret      : reference forecast for the DM test (default: zero return)
+        periods_per_year    : trading days per year for the annualised Sharpe (365 crypto, 252 exchange-traded)
     """
     true_ret, pred_ret, prev_close = map(np.ravel, (true_ret, pred_ret, prev_close))
     true_usd = prev_close * np.exp(true_ret)
@@ -111,7 +112,7 @@ def evaluate_forecast(true_ret, pred_ret, prev_close, naive_pred_ret=None):
         'DM_stat_vs_naive': dm, 'DM_pvalue': p_dm,
         'pred_std': float(np.std(pred_ret)), 'true_std': float(np.std(true_ret)),
     }
-    out.update(strategy_backtest(true_ret, pred_ret))
+    out.update(strategy_backtest(true_ret, pred_ret, periods_per_year=periods_per_year))
     return out
 
 
@@ -149,4 +150,5 @@ def evaluate_task(data, y_real_true, y_real_pred, naive_real, prev_close=None):
     """Dispatch on the task kind stored in the dataset dict."""
     if data['kind'] == 'vol':
         return evaluate_vol_forecast(y_real_true, y_real_pred, naive_real)
-    return evaluate_forecast(y_real_true, y_real_pred, prev_close, naive_pred_ret=naive_real)
+    return evaluate_forecast(y_real_true, y_real_pred, prev_close, naive_pred_ret=naive_real,
+                             periods_per_year=data.get('periods_per_year', 252))
