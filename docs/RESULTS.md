@@ -2,8 +2,8 @@
 
 All numbers are produced by `src/evaluation/backtesting.py` from the frozen data. Raw tables: `results/cv_results.csv` (walk-forward validation), `results/final_test_results.csv` (untouched test), `results/FINAL_RESULTS.md` (all models, all metrics), `results/regime_analysis.csv`, `results/experiments/*.csv`. Figures: `results/figures/`.
 
-**Data:** Yahoo Finance daily, 2018-01 → 2026-09-12 (Bitcoin 3,147 usable days; Gold/Silver 2,156 exchange days).
-**Split:** train ≤ 2025-09-10 (BTC 2,750 / metals 1,874 windows) · validation ≤ 2026-02-17 (160 / 109) · **unseen test 2026-02-18 → 2026-09-12** (BTC 207 days, Gold/Silver 143 exchange days). Served models are selected by mean walk-forward RMSE on train+val folds; the test set was evaluated once.
+**Data:** Yahoo Finance daily, 2018-01 → 2026-09-12 (Bitcoin 3,147 usable days; Gold/Silver 2,156 exchange days), complete bars only (the final audit replaced one intraday snapshot — Bitcoin's 2026-09-12 row, downloaded mid-day — with the complete bar; every reported number changed by < 0.001 %).
+**Split:** train ≤ 2025-09-10 (BTC 2,750 / metals 1,874 windows) · validation ≤ 2026-02-17 (160 / 109) · **unseen test 2026-02-18 → 2026-09-12** (BTC 207 days, Gold/Silver 143 exchange days). The **served forecast is the Combined one** — the equal-weight mean of the six trained models' predicted returns (no fitted weights, so nothing is selected on the test set); the best single model by mean walk-forward RMSE is reported alongside; the test set was evaluated once.
 **Close-time rule (final audit):** the metals' macro and High/Low-based features use the previous session's values because Yahoo's GC=F/SI=F close is the 13:30 ET settlement (`docs/METHODOLOGY.md §2`). Section 2 shows what the earlier same-day alignment did.
 
 ## 1. Final results table (unseen test set)
@@ -11,21 +11,26 @@ All numbers are produced by `src/evaluation/backtesting.py` from the frozen data
 | Asset | Model | MAE ($) | RMSE ($) | MAPE % | RMSE (return) | R² (return) | Directional acc. (p) | DM p vs naive |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Bitcoin | Naive (random walk) | 1,066.42 | 1,451.74 | 1.52 | 0.02079 | −0.001 | — | — |
-| Bitcoin | **CatBoost (served)** | 1,071.08 | 1,453.76 | 1.53 | 0.02082 | −0.004 | 46.9 % (0.83) | 0.74 |
+| Bitcoin | **Combined (served)** | 1,063.94 | 1,447.37 | 1.52 | 0.02072 | +0.006 | 46.9 % (0.83) | 0.49 |
+| Bitcoin | CatBoost (best single by CV) | 1,071.08 | 1,453.76 | 1.53 | 0.02082 | −0.004 | 46.9 % (0.83) | 0.74 |
 | Bitcoin | Stacked ensemble | 1,061.34 | 1,442.94 | 1.52 | 0.02065 | +0.013 | 50.2 % (0.50) | 0.44 |
 | Gold | Naive (random walk) | 58.26 | 75.76 | 1.29 | 0.01671 | −0.002 | — | — |
-| Gold | **CatBoost (served)** | 58.43 | 76.22 | 1.30 | 0.01681 | −0.015 | 51.7 % (0.37) | 0.71 |
+| Gold | **Combined (served)** | 58.20 | 75.73 | 1.29 | 0.01671 | -0.001 | 50.3 % (0.50) | 0.97 |
+| Gold | CatBoost (best single by CV) | 58.43 | 76.22 | 1.30 | 0.01681 | −0.015 | 51.7 % (0.37) | 0.71 |
 | Gold | Random Forest | 58.08 | 75.10 | 1.29 | 0.01659 | +0.012 | 49.0 % (0.63) | 0.57 |
 | Silver | Naive (random walk) | 1.79 | 2.37 | 2.49 | 0.03189 | −0.001 | — | — |
-| Silver | **GRU (served)** | 1.79 | 2.37 | 2.48 | 0.03189 | −0.001 | 55.2 % (0.12) | 0.99 |
+| Silver | **Combined (served)** | 1.78 | 2.37 | 2.47 | 0.03180 | +0.005 | 53.8 % (0.20) | 0.46 |
+| Silver | GRU (best single by CV) | 1.79 | 2.37 | 2.48 | 0.03189 | −0.001 | 55.2 % (0.12) | 0.99 |
 | Silver | Random Forest | 1.76 | 2.33 | 2.44 | 0.03146 | +0.026 | 56.6 % (0.07) | 0.17 |
 | Silver | LightGBM | 1.79 | 2.37 | 2.48 | 0.03189 | −0.001 | 58.7 % (0.02) | 0.98 |
 
-Full 10-model tables per asset: `results/FINAL_RESULTS.md`.
+Full 11-row tables per asset: `results/FINAL_RESULTS.md`.
 
-**Reading.** For all three assets every model sits at the random-walk floor: the served models' return-RMSE is 0.0–0.6 % *above* the naive forecast (never below it), no Diebold–Mariano test is significant (p = 0.71–0.99), and the R² in return space is ≈ 0. The served models' USD errors — MAPE 1.53 % (Bitcoin), 1.30 % (Gold), 2.48 % (Silver) — are the same as the random walk's (1.52 / 1.29 / 2.49 %) because that is the daily volatility of each asset, not model skill. **The honest answer to the research question is: no model beats the random walk at a one-day horizon for Bitcoin, Gold or Silver in this data.**
+**Reading.** For all three assets every model sits at the random-walk floor. The served **Combined** forecast's return-RMSE is 0.3 % below (Bitcoin, Silver) or equal to (Gold) the naive forecast, none of it significant (Diebold–Mariano p = 0.49 / 0.97 / 0.46), the best single models are 0.0–0.6 % *above* it, and the R² in return space is ≈ 0 everywhere. The combined forecast's USD errors — MAPE 1.52 % (Bitcoin), 1.29 % (Gold), 2.47 % (Silver) — are the same as the random walk's (1.52 / 1.29 / 2.49 %) because that is the daily volatility of each asset, not model skill. **The honest answer to the research question is: no model — single or combined — beats the random walk at a one-day horizon for Bitcoin, Gold or Silver in this data.**
 
-**The one p < 0.05 cell.** Silver LightGBM scores 58.7 % directional accuracy (binomial p = 0.02) but has *exactly* the random walk's RMSE (DM p = 0.98): it gets the sign right slightly more often while adding nothing to magnitude. With 27 model-rows in the test table, one cell at p ≈ 0.02 is what chance produces (`docs/LIMITATIONS.md §2`); its walk-forward figure is 53.3 %, and it was not the validation winner. It is not claimed.
+**Why the combination is served.** All six models lie within ~0.5 % of each other on the walk-forward folds, so picking one "winner" would be picking noise. The equal-weight mean is the standard robust choice for forecasts of similar quality (the *forecast-combination puzzle*: estimated weights rarely beat equal ones), it needs no fitting — so it cannot be tuned on the test set — and it is scored exactly like every single model: on the folds (Combined CV RMSE 0.03159 / 0.01113 / 0.02390 vs naive 0.03160 / 0.01114 / 0.02391) and once on the test set (rows above). It also makes the dashboard simpler: the user never chooses a model.
+
+**The one p < 0.05 cell.** Silver LightGBM scores 58.7 % directional accuracy (binomial p = 0.02) but has *exactly* the random walk's RMSE (DM p = 0.98): it gets the sign right slightly more often while adding nothing to magnitude. With 30 model-rows in the test table, one cell at p ≈ 0.02 is what chance produces (`docs/LIMITATIONS.md §2`); its walk-forward figure is 53.3 %, and it was not the validation winner. It is not claimed.
 
 ## 2. The leak the final audit found — same-day macro features for the metals
 
@@ -92,8 +97,8 @@ Validation RMSE is 0.8× (Bitcoin), 2.1× (Gold) and 2.9× (Silver) the training
 
 ## 8. What can be claimed
 
-* *"Under a frozen chronological split with walk-forward model selection and a single evaluation on 143–207 unseen days, none of ten model families beats the random-walk forecast for Bitcoin, Gold or Silver at a one-day horizon (Diebold–Mariano p ≥ 0.71 for the served models; directional accuracy 47–55 %, none significant)."*
-* *"The served models' next-day error is 1.3 % (Gold), 1.5 % (Bitcoin) and 2.5 % (Silver) of price — identical to the random walk's, which is the volatility floor of each asset. This number is not 'accuracy'."*
+* *"Under a frozen chronological split with walk-forward validation and a single evaluation on 143–207 unseen days, neither any of ten model families nor their equal-weight combination beats the random-walk forecast for Bitcoin, Gold or Silver at a one-day horizon (Diebold–Mariano p ≥ 0.46; directional accuracy 47–54 %, none significant)."*
+* *"The served combined forecast's next-day error is 1.3 % (Gold), 1.5 % (Bitcoin) and 2.5 % (Silver) of price — identical to the random walk's, which is the volatility floor of each asset. This number is not 'accuracy'."*
 * *"The project's own leakage audit found that a same-day alignment of macro features with the metals' 13:30 ET settlement manufactured a 62 % directional-accuracy result; correcting the alignment removed it."*
 
 Not claimable: any "X % accuracy" derived from MAPE or from R² on price levels; a market-beating edge on any asset; the archived Silver result.

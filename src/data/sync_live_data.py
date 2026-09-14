@@ -1,14 +1,16 @@
 """
-Refresh the latest market data for live demonstration.
+Refresh the latest market data for live prediction.
 
 Downloads go to data/raw_live/ (asset OHLCV, the external series and — for Silver — gold), and the
 result is written to data/processed/<prefix>_live_features.csv, which inference prefers when present.
 Nothing under data/raw/ or the frozen scaled splits is ever overwritten, so the reported results stay
-reproducible while the dashboard shows up-to-date prices.
+reproducible while the dashboard and the daily job use up-to-date prices.
+
+Every download already drops the running bar of the current day (complete-bar rule in
+src/data/data_collection.py / external_data.py), so the live feature file always ends on a finished bar.
 """
 import os
 import sys
-import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -37,10 +39,16 @@ def update_live_data(asset_name, refresh_external=True):
     cleaner = DataCleaner(asset_name, raw_dir=RAW_LIVE_DIR)
     if not cleaner.load_data():
         return False
-    cleaner.clean_data()
+    try:
+        cleaner.clean_data()
+    except ValueError as e:                              # feature validation failed (e.g. a corrupt download)
+        print(f"Live data for {asset_name} failed validation and was not written: {e}")
+        return False
     out = os.path.join(PROCESSED_DATA_DIR, f'{get_prefix(asset_name)}_live_features.csv')
-    cleaner.df.to_csv(out)
-    print(f"Live features for {asset_name} written to {out} (last day {cleaner.df.index[-1].date()})")
+    tmp = out + '.tmp'
+    cleaner.df.to_csv(tmp)
+    os.replace(tmp, out)                                 # atomic: a reader never sees a half-written file
+    print(f"Live features for {asset_name} written to {out} (last complete bar {cleaner.df.index[-1].date()})")
     return True
 
 

@@ -10,7 +10,7 @@ Figures:
   <prefix>_actual_vs_predicted.png      test period: returns (line + scatter) and price (with the naive shadow)
   <prefix>_residuals.png                residual distribution and residuals over time
   <prefix>_loss_curves.png              GRU / LSTM training vs validation loss
-  <prefix>_feature_importance.png       served model's feature importance (if available)
+  <prefix>_feature_importance.png       feature importance of the CV-selected tree model (the combined forecast has none)
   <prefix>_strategy.png                 cumulative long/flat strategy vs buy-and-hold on test
   overfitting_gap.png                   train vs validation RMSE per model
 """
@@ -31,7 +31,7 @@ plt.rcParams.update({'figure.dpi': 130, 'savefig.dpi': 160, 'font.size': 10, 'ax
 COLORS = {'Bitcoin': '#F7931A', 'Gold': '#C9A227', 'Silver': '#7F8C8D'}
 MODEL_COLORS = {'Naive': '#9E9E9E', 'Naive-Mean': '#BDBDBD', 'ARIMA': '#FF9800', 'Ridge': '#4CAF50',
                 'RandomForest': '#795548', 'LightGBM': '#2196F3', 'CatBoost': '#9C27B0', 'GRU': '#00BCD4',
-                'LSTM': '#3F51B5', 'Stacked': '#E91E63'}
+                'LSTM': '#3F51B5', 'Stacked': '#E91E63', 'Combined': '#00A896'}
 PRED_DIR = os.path.join(RESULTS_DIR, 'predictions')
 
 
@@ -96,7 +96,10 @@ def per_asset(asset, status):
     prefix = get_prefix(asset)
     pred = pd.read_csv(os.path.join(PRED_DIR, f'{prefix}_test_predictions.csv'), parse_dates=['date', 'target_date'])
     pred['date'] = pred['target_date']   # plot against the day being predicted
-    served = status[asset]['primary_model']
+    # the served forecast (Combined) when the evaluation produced it, else the CV-selected single model
+    served = status[asset].get('served_forecast', status[asset]['primary_model'])
+    if f'pred_return_{served}' not in pred.columns:
+        served = status[asset]['primary_model']
     test = pd.read_csv(os.path.join(RESULTS_DIR, 'final_test_results.csv'))
     met = test[(test['asset'] == asset) & (test['model'] == served)].iloc[0]
     r_true, r_pred = pred['actual_return'].values, pred[f'pred_return_{served}'].values
@@ -163,6 +166,8 @@ def per_asset(asset, status):
     if os.path.exists(fi_path):
         fi = pd.read_csv(fi_path)
         fi = fi[(fi['asset'] == asset) & (fi['model'] == served)]
+        if fi.empty:      # the combined forecast / recurrent models expose no importance → the CV-selected tree model's
+            fi = pd.read_csv(fi_path); fi = fi[(fi['asset'] == asset) & (fi['model'] == status[asset]['primary_model'])]
         if fi.empty:
             fi = pd.read_csv(fi_path); fi = fi[(fi['asset'] == asset) & (fi['model'] == 'LightGBM')]
         if not fi.empty:

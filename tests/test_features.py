@@ -61,6 +61,7 @@ def _macro_return(fname):
     return np.log(s / s.shift(1))
 
 
+@pytest.mark.skipif(not os.path.exists(os.path.join(__import__('config').RAW_DATA_DIR, 'sp500_data.csv')), reason="raw macro data not present (CI)")
 def test_commodity_external_features_are_previous_day_values(synthetic_price_data):
     """
     GC=F / SI=F close at the 13:30 ET settlement, BEFORE the S&P/VIX/DXY/TNX/WTI closes: at row t a metal

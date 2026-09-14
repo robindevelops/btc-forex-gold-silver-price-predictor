@@ -27,7 +27,7 @@ train:                   ## two-phase training of every model with the tuned par
 stack:                   ## stacked-ensemble experiment (OOF meta-model)
 	$(PY) src/models/ensemble_model.py
 
-evaluate:                ## ONE evaluation on the untouched test set + model selection by CV
+evaluate:                ## ONE evaluation on the untouched test set (+ the Combined forecast) and CV model comparison
 	$(PY) src/evaluation/backtesting.py
 
 figures:                 ## report figures into results/figures/
@@ -42,7 +42,7 @@ report:                  ## regenerate docs/FYP_Final_Report.pdf and docs/Execut
 
 pipeline: preprocess eda tune train stack evaluate figures experiments test   ## full reproducible run from raw data
 
-predict:
+predict:                 ## print today's combined next-day prediction for every asset (no logging)
 	$(PY) src/inference/prediction.py
 
 serve:

@@ -20,12 +20,14 @@ The first evaluation of the improved system reported 62 % directional accuracy f
 The test window (Feb–Sep 2026) is *not* like the training window: Gold trades at $3,986–5,294 vs a training range of $1,817–3,644; Silver's 30-day volatility exceeds every value seen in training on 89 % of test days; Bitcoin fell ~15 % in early June 2026. Volatility-based features are out of their training range for Gold/Silver (`volatility_30d`, `atr_norm`). Stationary features reduce but do not remove this problem. A single 5-month test window is also just one draw from a non-stationary process — the walk-forward folds give the more reliable picture.
 
 ## 4. Data quality
-* Gold/Silver are **front-month futures** (GC=F, SI=F); the price series contains roll effects and the yfinance volume column is unusable (dropped).
+* Gold/Silver are **front-month futures** (GC=F, SI=F); the price series contains roll effects and the yfinance volume column is unusable (dropped). Yahoo's choice of front contract is not even stable from one day to the next (on 2026-09-11 it reported 4,366.20 and, a day later, 4,408.90 for the same date), so a live forecast for the metals can start from a different close than the frozen dataset shows for the same day; the dashboard says so.
+* Yahoo returns the current day's running bar as if it were a close. All downloads now drop it (complete-bar rule); the final audit found and replaced one such snapshot in the frozen Bitcoin file (2026-09-12; close off by 0.001 %, no reported number changed). Yahoo also publishes Bitcoin's previous-day bar with a delay of several hours; until it appears, *Run prediction* starts from the last complete bar available and says so.
 * Yahoo Finance is an unofficial, free source; BTC-USD is a composite index that can differ from any exchange's price.
 * External series are aligned by forward fill on the asset's calendar; when the asset trades on a day the external market does not, the previous external return is repeated (a stale value, not a fresh one). For the metals the macro features are one day older than the price by construction (close-time rule).
 * Fear & Greed is a proprietary composite whose formula changed over time.
 
 ## 5. Modelling choices
+* The served forecast is the equal-weight mean of six models. The alternative with fitted weights — the stacked ensemble — is a reported experiment: on the test set it is marginally better than the equal-weight combination for Bitcoin and worse for Gold and Silver, i.e. no consistent advantage. Equal weights are the defensible default when the members are statistically indistinguishable, but they are also a ceiling: a combination cannot be much better than its members when the members carry no signal.
 * One-day horizon is served; the 5-day-return and 22-day-volatility targets were evaluated as experiments only (E3, E4) and not productised.
 * Point forecasts only. The ±1 RMSE band shown in the dashboard is an ex-post error band, not a calibrated predictive interval.
 * Hyper-parameter grids are small by design (seconds–minutes per model); a larger search could change the ranking marginally but not the conclusion about the random walk.

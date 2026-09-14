@@ -1,13 +1,14 @@
 """
-External Data Collection Module.
+External data: macro series from Yahoo Finance and the crypto Fear & Greed index.
 
-Week 4: Fetches external macro and sentiment data to enrich
-the prediction pipeline with signals the price chart alone cannot capture.
+    python src/data/external_data.py          # → data/raw/{dxy,crude_oil,vix,tnx,sp500,fear_greed}_data.csv
 
 Sources:
-  - US Dollar Index (DXY): Strongest known external driver of Gold/Silver
-  - Crude Oil (CL=F): Commodity co-movement signal
-  - Bitcoin Fear & Greed Index: Crypto-specific sentiment indicator
+  - US Dollar Index (DX-Y.NYB), WTI crude (CL=F), VIX (^VIX), 10-year yield (^TNX), S&P 500 (^GSPC)
+  - Bitcoin Fear & Greed Index (alternative.me, free, no key)
+
+The running bar of the current US session is dropped (complete-bar rule, src/data/market_calendar.py).
+How each series is aligned to an asset's calendar without look-ahead is decided in preprocessing.
 """
 
 import os
@@ -15,11 +16,11 @@ import sys
 import json
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from config import RAW_DATA_DIR, DATA_START_DATE
+from src.data.market_calendar import drop_incomplete_bars
 
 # External data configuration
 EXTERNAL_SOURCES = {
@@ -79,6 +80,7 @@ def fetch_yfinance_external(source_name, out_dir=RAW_DATA_DIR):
     df = df[['Date', 'Close']]
     df.columns = ['timestamp', 'price']
     df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
+    df = drop_incomplete_bars(df, 'commodity')            # US session: today's row is final only after 17:15 ET
     
     os.makedirs(out_dir, exist_ok=True)
     filepath = os.path.join(out_dir, config['filename'])
@@ -146,12 +148,12 @@ def fetch_fear_greed_index(out_dir=RAW_DATA_DIR):
 def fetch_all_external_data(out_dir=RAW_DATA_DIR):
     """Fetches all external data sources and saves to `out_dir` (data/raw by default)."""
     print("=" * 50)
-    print("  FETCHING EXTERNAL DATA (Week 4)")
+    print("  FETCHING EXTERNAL DATA")
     print("=" * 50)
     
     results = {}
     
-    # yfinance sources (DXY, Crude Oil)
+    # yfinance sources
     for source_name in EXTERNAL_SOURCES:
         results[source_name] = fetch_yfinance_external(source_name, out_dir)
     

@@ -314,7 +314,9 @@ class _KerasSequenceModel(BaseModel):
         return path
 
     def load(self, asset_name, task='return_1d'):
+        import logging
         from tensorflow.keras.models import load_model
+        logging.getLogger('tensorflow').setLevel(logging.ERROR)     # silence the benign 'retracing' warning at inference
         path = os.path.join(MODELS_DIR, f'{artefact_stem(asset_name, self.name, task)}.keras')
         self.model = load_model(path)
         with open(path + '.json') as f:

@@ -15,13 +15,12 @@ import json
 import time
 import argparse
 import itertools
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-from config import ASSETS, TUNING_DIR, BEST_PARAMS_PATH, DEFAULT_PARAMS, CV_FOLDS, DEFAULT_TASK, TASKS
+from config import ASSETS, TUNING_DIR, BEST_PARAMS_PATH, CV_FOLDS, DEFAULT_TASK, TASKS
 from src.data.preprocessing import build_dataset
 from src.evaluation.cross_validation import cv_evaluate, summarise_folds, primary_metric
 from src.utils.logging_config import get_logger

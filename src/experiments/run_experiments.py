@@ -14,7 +14,6 @@ Outputs (results/experiments/):
 """
 import os
 import sys
-import json
 import argparse
 import numpy as np
 import pandas as pd
@@ -25,7 +24,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from config import ASSETS, EXPERIMENTS_DIR, CV_FOLDS
 from src.data.preprocessing import build_dataset
 from src.models.registry import make_model
-from src.evaluation.cross_validation import cv_evaluate, summarise_folds, primary_metric
+from src.evaluation.cross_validation import cv_evaluate, summarise_folds
 from src.utils.metrics import evaluate_task
 from src.utils.logging_config import get_logger, setup_logging
 

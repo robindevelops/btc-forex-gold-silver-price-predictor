@@ -7,6 +7,9 @@ Download daily OHLCV for Bitcoin (BTC-USD), Gold (GC=F) and Silver (SI=F) from Y
 Output: data/raw/<asset>_data.csv with columns timestamp, open, high, low, price (close), volume.
 Gold/Silver are front-month futures: they trade on exchange days only (no weekend rows are
 created — see preprocessing) and the yfinance volume column is contract-specific and noisy.
+
+Complete-bar rule (src/data/market_calendar.py): Yahoo returns the running bar of the current day as if
+it were finished; it is dropped, so a saved file never ends on an intraday snapshot.
 """
 import os
 import argparse
@@ -17,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from config import RAW_DATA_DIR, ASSET_CONFIG, DATA_START_DATE
+from src.data.market_calendar import drop_incomplete_bars
 
 
 def fetch_asset(asset_name, start=DATA_START_DATE, out_dir=RAW_DATA_DIR):
@@ -35,6 +39,10 @@ def fetch_asset(asset_name, start=DATA_START_DATE, out_dir=RAW_DATA_DIR):
     df.columns = ['timestamp', 'open', 'high', 'low', 'price', 'volume']
     df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
     df = df.dropna(subset=['price'])
+    n = len(df)
+    df = drop_incomplete_bars(df, cfg['type'])
+    if len(df) < n:
+        print(f"  dropped {n - len(df)} incomplete (still-running) bar(s); last complete bar {df['timestamp'].max().date()}")
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, cfg['filename'])
     df.to_csv(path, index=False)

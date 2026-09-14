@@ -18,7 +18,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from statsmodels.tsa.stattools import adfuller, acf, pacf
+from statsmodels.tsa.stattools import adfuller, acf
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from scipy import stats
 
@@ -78,7 +78,7 @@ def main():
     fig_dist.tight_layout(); fig_dist.savefig(os.path.join(FIGURES_DIR, 'eda_return_distributions.png'), dpi=150)
     fig_vol.tight_layout(); fig_vol.savefig(os.path.join(FIGURES_DIR, 'eda_volatility_clustering.png'), dpi=150)
     pd.DataFrame(rows).to_csv(os.path.join(RESULTS_DIR, 'eda_summary.csv'), index=False)
-    print(f"Saved results/eda_summary.csv and figures/eda_*.png")
+    print("Saved results/eda_summary.csv and figures/eda_*.png")
 
 
 if __name__ == '__main__':

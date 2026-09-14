@@ -2,18 +2,19 @@
 
 Split: train ≤ 2025-09-10, validation ≤ 2026-02-17, test = remainder (touched once).
 
-Model selection uses walk-forward validation only. **Bold** = served model. DA = directional accuracy on non-flat days (p = one-sided binomial test vs 50%). DM p = Diebold–Mariano test vs the zero-return random-walk forecast (squared error, return space).
+**Bold** = the served forecast (Combined: equal-weight mean of the trained base models, no fitted weights). *Italic* = the best single model by walk-forward validation (test set never used for selection). DA = directional accuracy on non-flat days (p = one-sided binomial test vs 50%). DM p = Diebold–Mariano test vs the zero-return random-walk forecast (squared error, return space).
 
 ## Bitcoin
 
-Test period 2026-02-18 → 2026-09-12 (207 days). Served model: **CatBoost** (selected by CV RMSE 0.03156 vs naive 0.03160).
+Test period 2026-02-18 → 2026-09-12 (207 days). Served forecast: **Combined** of Ridge, RandomForest, LightGBM, CatBoost, GRU, LSTM. Best single model by CV: *CatBoost* (CV RMSE 0.03156 vs naive 0.03160).
 
 ### Walk-forward validation (train+val, 4 expanding folds)
 
 | Model | RMSE (ret) | MAE (ret) | R² (ret) | Dir. Acc % | RMSE ($) |
 |---|---:|---:|---:|---:|---:|
-| **CatBoost** | 0.03156 ± 0.00695 | 0.02136 | -0.001 | 50.2 | 1,427.07 |
+| *CatBoost* | 0.03156 ± 0.00695 | 0.02136 | -0.001 | 50.2 | 1,427.07 |
 | LightGBM | 0.03158 ± 0.00692 | 0.02140 | -0.003 | 51.2 | 1,430.52 |
+| **Combined** | 0.03159 ± 0.00693 | 0.02133 | -0.004 | 50.8 | 1,429.51 |
 | Naive | 0.03160 ± 0.00690 | 0.02130 | -0.005 | 0.0 | 1,429.08 |
 | RandomForest | 0.03160 ± 0.00688 | 0.02140 | -0.005 | 50.0 | 1,432.90 |
 | Ridge | 0.03161 ± 0.00693 | 0.02135 | -0.005 | 49.4 | 1,430.34 |
@@ -26,27 +27,29 @@ Test period 2026-02-18 → 2026-09-12 (207 days). Served model: **CatBoost** (se
 
 | Model | MAE ($) | RMSE ($) | MAPE % | RMSE (ret) | R² (ret) | Dir. Acc % (n, p) | DM p vs naive | Strategy % | Buy&Hold % |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Stacked | 1,061.34 | 1,442.94 | 1.52 | 0.02065 | +0.013 | 50.2 (207, 0.50) | 0.44 | +2.3 | +14.5 |
+| Stacked | 1,061.35 | 1,442.94 | 1.52 | 0.02065 | +0.013 | 50.2 (207, 0.50) | 0.44 | +2.3 | +14.5 |
 | LightGBM | 1,076.49 | 1,446.18 | 1.54 | 0.02068 | +0.010 | 51.2 (207, 0.39) | 0.79 | +5.4 | +14.5 |
+| **Combined** | 1,063.94 | 1,447.37 | 1.52 | 0.02072 | +0.006 | 46.9 (207, 0.83) | 0.49 | -5.1 | +14.5 |
 | RandomForest | 1,064.48 | 1,448.81 | 1.52 | 0.02075 | +0.004 | 48.3 (207, 0.71) | 0.62 | -3.6 | +14.5 |
 | Naive-Mean | 1,067.32 | 1,451.38 | 1.53 | 0.02078 | -0.000 | 49.3 (207, 0.61) | 0.81 | +14.4 | +14.5 |
-| Naive | 1,066.42 | 1,451.74 | 1.52 | 0.02079 | -0.001 | — | — | +0.0 | +14.5 |
+| Naive | 1,066.42 | 1,451.73 | 1.52 | 0.02079 | -0.001 | — | — | +0.0 | +14.5 |
 | Ridge | 1,071.97 | 1,452.59 | 1.53 | 0.02080 | -0.002 | 47.8 (207, 0.76) | 0.91 | +4.4 | +14.5 |
 | LSTM | 1,068.06 | 1,453.44 | 1.53 | 0.02082 | -0.004 | 46.4 (207, 0.87) | 0.35 | -7.8 | +14.5 |
-| **CatBoost** | 1,071.08 | 1,453.76 | 1.53 | 0.02082 | -0.004 | 46.9 (207, 0.83) | 0.74 | -5.6 | +14.5 |
+| *CatBoost* | 1,071.07 | 1,453.76 | 1.53 | 0.02082 | -0.004 | 46.9 (207, 0.83) | 0.74 | -5.6 | +14.5 |
 | GRU | 1,075.86 | 1,458.31 | 1.54 | 0.02089 | -0.010 | 46.9 (207, 0.83) | 0.35 | -14.0 | +14.5 |
 | ARIMA | 1,067.96 | 1,459.44 | 1.53 | 0.02091 | -0.012 | 46.9 (207, 0.83) | 0.35 | -9.0 | +14.5 |
 
 ## Gold
 
-Test period 2026-02-18 → 2026-09-11 (143 days). Served model: **CatBoost** (selected by CV RMSE 0.01110 vs naive 0.01114).
+Test period 2026-02-18 → 2026-09-11 (143 days). Served forecast: **Combined** of Ridge, RandomForest, LightGBM, CatBoost, GRU, LSTM. Best single model by CV: *CatBoost* (CV RMSE 0.01110 vs naive 0.01114).
 
 ### Walk-forward validation (train+val, 4 expanding folds)
 
 | Model | RMSE (ret) | MAE (ret) | R² (ret) | Dir. Acc % | RMSE ($) |
 |---|---:|---:|---:|---:|---:|
-| **CatBoost** | 0.01110 ± 0.00219 | 0.00786 | -0.001 | 54.8 | 28.29 |
+| *CatBoost* | 0.01110 ± 0.00219 | 0.00786 | -0.001 | 54.8 | 28.29 |
 | Ridge | 0.01112 ± 0.00223 | 0.00787 | -0.003 | 54.8 | 28.40 |
+| **Combined** | 0.01113 ± 0.00222 | 0.00788 | -0.004 | 52.5 | 28.39 |
 | Naive-Mean | 0.01113 ± 0.00223 | 0.00787 | -0.004 | 55.8 | 28.43 |
 | LightGBM | 0.01113 ± 0.00223 | 0.00787 | -0.004 | 55.8 | 28.42 |
 | GRU | 0.01114 ± 0.00222 | 0.00791 | -0.007 | 51.1 | 28.45 |
@@ -61,25 +64,27 @@ Test period 2026-02-18 → 2026-09-11 (143 days). Served model: **CatBoost** (se
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | RandomForest | 58.08 | 75.10 | 1.29 | 0.01659 | +0.012 | 49.0 (143, 0.63) | 0.57 | -10.4 | -10.6 |
 | GRU | 58.00 | 75.42 | 1.29 | 0.01664 | +0.007 | 51.7 (143, 0.37) | 0.58 | -6.5 | -10.6 |
+| **Combined** | 58.20 | 75.73 | 1.29 | 0.01671 | -0.001 | 50.3 (143, 0.50) | 0.97 | -7.9 | -10.6 |
 | Naive | 58.26 | 75.76 | 1.29 | 0.01671 | -0.002 | — | — | +0.0 | -10.6 |
 | LightGBM | 58.25 | 75.81 | 1.29 | 0.01672 | -0.003 | 49.7 (143, 0.57) | 0.88 | -10.7 | -10.6 |
 | Naive-Mean | 58.39 | 75.99 | 1.30 | 0.01675 | -0.007 | 49.7 (143, 0.57) | 0.43 | -10.7 | -10.6 |
 | Ridge | 58.51 | 76.05 | 1.30 | 0.01677 | -0.009 | 50.3 (143, 0.50) | 0.76 | -7.6 | -10.6 |
-| **CatBoost** | 58.43 | 76.22 | 1.30 | 0.01681 | -0.015 | 51.7 (143, 0.37) | 0.71 | -7.0 | -10.6 |
+| *CatBoost* | 58.43 | 76.22 | 1.30 | 0.01681 | -0.015 | 51.7 (143, 0.37) | 0.71 | -7.0 | -10.6 |
 | ARIMA | 58.57 | 76.27 | 1.30 | 0.01681 | -0.015 | 50.3 (143, 0.50) | 0.52 | -5.8 | -10.6 |
 | LSTM | 58.82 | 76.58 | 1.31 | 0.01687 | -0.022 | 49.7 (143, 0.57) | 0.28 | -10.7 | -10.6 |
 | Stacked | 58.95 | 77.28 | 1.31 | 0.01705 | -0.043 | 51.0 (143, 0.43) | 0.44 | -7.9 | -10.6 |
 
 ## Silver
 
-Test period 2026-02-18 → 2026-09-11 (143 days). Served model: **GRU** (selected by CV RMSE 0.02387 vs naive 0.02391).
+Test period 2026-02-18 → 2026-09-11 (143 days). Served forecast: **Combined** of Ridge, RandomForest, LightGBM, CatBoost, GRU, LSTM. Best single model by CV: *GRU* (CV RMSE 0.02387 vs naive 0.02391).
 
 ### Walk-forward validation (train+val, 4 expanding folds)
 
 | Model | RMSE (ret) | MAE (ret) | R² (ret) | Dir. Acc % | RMSE ($) |
 |---|---:|---:|---:|---:|---:|
-| **GRU** | 0.02387 ± 0.00625 | 0.01592 | +0.002 | 52.3 | 1.00 |
+| *GRU* | 0.02387 ± 0.00625 | 0.01592 | +0.002 | 52.3 | 1.00 |
 | LightGBM | 0.02389 ± 0.00625 | 0.01592 | -0.000 | 53.3 | 1.00 |
+| **Combined** | 0.02390 ± 0.00624 | 0.01592 | -0.001 | 52.7 | 1.00 |
 | CatBoost | 0.02391 ± 0.00623 | 0.01594 | -0.002 | 53.5 | 1.00 |
 | Naive-Mean | 0.02391 ± 0.00623 | 0.01594 | -0.002 | 53.5 | 1.00 |
 | Naive | 0.02391 ± 0.00624 | 0.01596 | -0.002 | 0.0 | 1.00 |
@@ -93,9 +98,10 @@ Test period 2026-02-18 → 2026-09-11 (143 days). Served model: **GRU** (selecte
 | Model | MAE ($) | RMSE ($) | MAPE % | RMSE (ret) | R² (ret) | Dir. Acc % (n, p) | DM p vs naive | Strategy % | Buy&Hold % |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | RandomForest | 1.76 | 2.33 | 2.44 | 0.03146 | +0.026 | 56.6 (143, 0.07) | 0.17 | +6.5 | -12.1 |
+| **Combined** | 1.78 | 2.37 | 2.47 | 0.03180 | +0.005 | 53.8 (143, 0.20) | 0.46 | -6.0 | -12.1 |
 | Ridge | 1.79 | 2.37 | 2.48 | 0.03181 | +0.005 | 54.5 (143, 0.16) | 0.48 | -0.7 | -12.1 |
 | LightGBM | 1.79 | 2.37 | 2.48 | 0.03189 | -0.001 | 58.7 (143, 0.02) | 0.98 | +10.1 | -12.1 |
-| **GRU** | 1.79 | 2.37 | 2.48 | 0.03189 | -0.001 | 55.2 (143, 0.12) | 0.99 | +3.7 | -12.1 |
+| *GRU* | 1.79 | 2.37 | 2.48 | 0.03189 | -0.001 | 55.2 (143, 0.12) | 0.99 | +3.7 | -12.1 |
 | Naive | 1.79 | 2.37 | 2.49 | 0.03189 | -0.001 | — | — | +0.0 | -12.1 |
 | Stacked | 1.79 | 2.38 | 2.48 | 0.03191 | -0.002 | 52.4 (143, 0.31) | 0.91 | -11.0 | -12.1 |
 | Naive-Mean | 1.79 | 2.38 | 2.49 | 0.03192 | -0.003 | 51.7 (143, 0.37) | 0.63 | -12.2 | -12.1 |

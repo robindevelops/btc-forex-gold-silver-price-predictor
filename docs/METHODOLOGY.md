@@ -35,7 +35,7 @@ where `P_t` is the close on trading day `t`. A price forecast is derived afterwa
 | VIX | Yahoo Finance | `^VIX` | all assets |
 | Crypto Fear & Greed | alternative.me | — | Bitcoin |
 
-Stored history: **2018-01-01 → 2026-09-12** (BTC 3,177 raw / 3,147 usable days; Gold/Silver 2,186 raw / 2,156 usable exchange days), downloaded with `config.DATA_START_DATE = 2018-01-01`. The earlier 3-year version (2023-07 → 2026-07) is kept in `data/raw_3y_backup/` and its results in `results/archive_3y_final/` for the before/after comparison.
+Stored history: **2018-01-01 → 2026-09-12** (BTC 3,177 raw / 3,147 usable days; Gold/Silver 2,186 raw / 2,156 usable exchange days), downloaded with `config.DATA_START_DATE = 2018-01-01`. **Complete bars only** (`src/data/market_calendar.py`): Yahoo returns the running bar of the current day as if it were finished, so every download drops rows dated on or after the cutoff — today's UTC date for Bitcoin, today's ET date before 17:15 ET (tomorrow's after) for the futures and the US-market series. The final audit found that the frozen Bitcoin file ended on such a snapshot (2026-09-12, downloaded at 11:28 UTC that day) and replaced it with the complete bar; the close differed by 0.001 % and no reported number changed at the displayed precision. The earlier 3-year version (2023-07 → 2026-07) is kept in `data/raw_3y_backup/` and its results in `results/archive_3y_final/` for the before/after comparison.
 
 ### Cleaning (`src/data/preprocessing.py::DataCleaner.clean_data`)
 1. Drop duplicate timestamps, sort chronologically, drop non-positive prices.
@@ -102,6 +102,10 @@ test       2026-02-18 → 2026-09-12       (207 / 143)   ← touched ONCE
 
 **Two-phase training.** Models with a stopping rule (trees, boosting iterations, epochs) are fitted on train while monitoring validation to choose the stopping point (phase A, gives honest validation metrics and loss curves), then refitted on train+val with that stopping point fixed (phase B, the deployed model). Validation is never inside its own early-stopping monitor.
 
+## 5b. The served forecast — equal-weight combination
+
+The dashboard and the API serve the **Combined** forecast: every trained model (Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM) predicts the next-day log return from the same input window, and the six predictions are averaged with **equal weights**; the sign of the average is the UP/DOWN call. Rationale: (i) all six models are within ~0.5 % of each other on the walk-forward folds, so selecting one is selecting noise; (ii) equal weights are the standard robust choice for forecasts of similar quality — estimated combination weights rarely beat them out of sample (the *forecast-combination puzzle*); (iii) nothing is fitted, so the combination cannot be tuned on the test set; (iv) the user never has to choose a model. The combination is evaluated exactly like a single model — its members' out-of-fold predictions are averaged per walk-forward fold (`results/cv_results.csv`, row *Combined*) and its test predictions are the mean of the members' test predictions (`results/final_test_results.csv`, row *Combined*; `tests/test_models_and_inference.py::test_combined_test_row_is_the_mean_of_its_members`). The stacked ensemble (fitted non-negative weights on out-of-fold predictions) remains a reported experiment and is not a member. The single model with the lowest mean fold RMSE is still identified (`model_status.json: primary_model`) and shown for comparison.
+
 ## 6. Validation and model selection
 
 **Expanding-window walk-forward validation** (`src/evaluation/cross_validation.py`), 4 folds over the train+val period:
@@ -113,7 +117,7 @@ fold 3: train [0 … 80 %)          validate next block
 fold 4: train [0 … 90 %)          validate last block
 ```
 
-Inside each fold the last 15 % of the fold's training window is the early-stopping monitor. Hyper-parameters (`src/training/tune_models.py`) and the served model per asset (`src/evaluation/backtesting.py`) are chosen by **mean fold RMSE of the return** — the test set is never loaded by either script.
+Inside each fold the last 15 % of the fold's training window is the early-stopping monitor. Hyper-parameters (`src/training/tune_models.py`) and the best single model per asset (`src/evaluation/backtesting.py`) are chosen by **mean fold RMSE of the return** — the test set is never loaded by either script. The served combined forecast needs no selection step (§5b).
 
 **Why walk-forward rather than k-fold.** k-fold would train on 2026 data to predict 2024, which is impossible in deployment and leaks regime information. Walk-forward always predicts forward in time and yields several out-of-sample estimates, so we can report mean ± std instead of one lucky window.
 
@@ -153,3 +157,5 @@ E1 data size (3-year vs full history on the fixed validation window), E2 feature
 | Test set touched more than once | no | only `backtesting.py` reads `X_test` |
 | Multi-day targets straddling a split | no | split by target dates; `test_task_targets_are_future_only_and_embargoed` |
 | Demo prediction using future rows | no | `predict_for_date` slices `features.loc[:as_of]`; `test_predict_for_date_uses_only_past_data_and_reveals_actual` perturbs every row after the chosen day and asserts the forecast is unchanged |
+| Intraday snapshot used as a close | no | complete-bar rule at download time (`market_calendar.py`; `test_drop_incomplete_bars_removes_todays_running_row`) |
+| Combination weights tuned on the test set | no | equal weights, nothing fitted; the Combined row is the mean of the members' predictions (`test_combined_test_row_is_the_mean_of_its_members`) |

@@ -17,7 +17,7 @@ statsmodels==0.14.6
 # Data Sources
 yfinance==1.2.0
 requests==2.32.5
-python-dotenv>=1.0.0
+tzdata>=2024.1          # IANA zones for zoneinfo (complete-bar rule: America/New_York) on systems without a tz database
 
 # Visualization
 matplotlib==3.9.4

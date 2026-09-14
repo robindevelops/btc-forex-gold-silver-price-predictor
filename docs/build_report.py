@@ -75,8 +75,8 @@ best = json.load(open(os.path.join(TUNING_DIR, 'best_params.json')))
 stack = {a: json.load(open(os.path.join(RESULTS_DIR, 'stacking', f'{a.lower()}_stack_weights.json'))) for a in ASSETS}
 tv_piv = tv.pivot_table(index=['asset', 'model'], columns='split', values='RMSE_ret')
 
-ORDER = ['Naive', 'Naive-Mean', 'ARIMA', 'Ridge', 'RandomForest', 'LightGBM', 'CatBoost', 'GRU', 'LSTM', 'Stacked']
-NICE = {'Naive': 'Naive (random walk)', 'Naive-Mean': 'Historical mean', 'RandomForest': 'Random Forest', 'Stacked': 'Stacked ensemble'}
+ORDER = ['Naive', 'Naive-Mean', 'ARIMA', 'Ridge', 'RandomForest', 'LightGBM', 'CatBoost', 'GRU', 'LSTM', 'Stacked', 'Combined']
+NICE = {'Naive': 'Naive (random walk)', 'Naive-Mean': 'Historical mean', 'RandomForest': 'Random Forest', 'Stacked': 'Stacked ensemble', 'Combined': 'Combined (mean of 6)'}
 BA = pd.read_csv(os.path.join(RESULTS_DIR, 'experiments', 'before_after.csv'))
 EXP = {k: pd.read_csv(os.path.join(RESULTS_DIR, 'experiments', f)) for k, f in (('E1', 'E1_data_size.csv'), ('E2', 'E2_feature_ablation.csv'), ('E3', 'E3_horizon.csv'), ('E4', 'E4_volatility.csv'))}
 REG = pd.read_csv(os.path.join(RESULTS_DIR, 'regime_analysis.csv'))
@@ -196,7 +196,7 @@ def results_table(asset):
         r, c = row(asset, m), cvrow(asset, m)
         if r is None:
             continue
-        name = NICE.get(m, m) + (' (served)' if m == served else '')
+        name = NICE.get(m, m) + (' (served)' if m == 'Combined' else (' (best single)' if m == served else ''))
         cvtxt = f"{c['RMSE_ret_mean']:.5f} ± {c['RMSE_ret_std']:.5f}" if c is not None else '—'
         da = '—' if m == 'Naive' else f"{r['DirAcc_pct']:.1f} ({r['DirAcc_pvalue']:.2f})"
         dm = '—' if m == 'Naive' else f"{r['DM_pvalue']:.2f}"
@@ -221,17 +221,20 @@ def exec_summary_flowables():
     f.append(P(
         f'<b>Methodology.</b> A frozen chronological split (train ≤ {TRAIN_END}, validation ≤ {VAL_END}, test = '
         f'2026-02-18 → 2026-09-12) with no shuffling; a scaler fitted on training rows only; 28–29 stationary, backward-looking '
-        f'features; hyper-parameters and the served model chosen by {CV_FOLDS}-fold expanding-window walk-forward validation inside '
-        'train+val; and a single evaluation of the untouched test set. Ten model families are compared on identical days: a '
-        'random-walk baseline, historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM and a stacked ensemble. '
+        f'features; hyper-parameters chosen by {CV_FOLDS}-fold expanding-window walk-forward validation inside train+val; and a single '
+        'evaluation of the untouched test set. Ten model families are compared on identical days: a random-walk baseline, historical '
+        'mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM and a stacked ensemble. The <b>served forecast is the '
+        'equal-weight combination</b> of the six trained models (no fitted weights, so nothing is selected on the test set), evaluated '
+        'on the walk-forward folds and on the test set exactly like every single model. '
         'Every feature obeys a <i>close-time rule</i> — it may only use what is known when the asset\'s daily close is fixed (same-day '
         'macro data for Bitcoin, previous-day data for the metals, whose Yahoo close is the 13:30 ET COMEX settlement). '
-        'Twelve specific data-leakage checks are enforced by a 34-case test suite.'))
+        'Fourteen specific data-leakage checks are enforced by a 41-case test suite; only complete daily bars are ever used.'))
     f.append(P(
-        '<b>Result.</b> The validation-selected models are CatBoost for Bitcoin and Gold and a GRU for Silver. On the untouched test '
-        'set all three assets sit at the random-walk floor: the served models\' return-RMSE is 0.0–0.6 % <i>above</i> the naive forecast '
-        '(Diebold–Mariano p = 0.71–0.99), directional accuracy 46.9 % / 51.7 % / 55.2 % (binomial p = 0.83 / 0.37 / 0.12) and R² in '
-        'return space ≈ 0. <b>No model beats the random walk at a one-day horizon for Bitcoin, Gold or Silver.</b> The result is '
+        '<b>Result.</b> On the untouched test set all three assets sit at the random-walk floor: the served combined forecast\'s '
+        'return-RMSE is within ±0.3 % of the naive forecast (Diebold–Mariano p = 0.49 / 0.97 / 0.46), directional accuracy '
+        '46.9 % / 50.3 % / 53.8 % (binomial p = 0.83 / 0.50 / 0.20) and R² in return space ≈ 0; the best single models by validation '
+        '(CatBoost for Bitcoin and Gold, a GRU for Silver) are 0.0–0.6 % <i>above</i> the naive forecast. <b>No model — single or '
+        'combined — beats the random walk at a one-day horizon for Bitcoin, Gold or Silver.</b> The result is '
         'consistent with weak-form market efficiency; the application reports the measured error next to every forecast. An '
         'intermediate version of the system reported 62 % directional accuracy for Silver; the final audit traced it to a close-time '
         'leak (same-day macro features against a 13:30 ET futures settlement), fixed it and re-ran the pipeline — the finding is '
@@ -242,14 +245,15 @@ def exec_summary_flowables():
         'early stopping on training data, non-stationary price-level features, a served ensemble that predicted a constant, a '
         'broken inference path and misleading R² values (≈ 0.95 on price levels, which a random walk also achieves). All were fixed. '
         'A second, measured improvement phase then added 2.9× more training data (2018 →), volatility/momentum features, re-tuning, '
-        'and logged design experiments; a final audit found and removed the close-time leak. On identical unseen days the served models '
+        'and logged design experiments; a final audit found and removed the close-time leak. On identical unseen days the best single models '
         'moved by −0.6 % (Gold), −0.4 % (Silver) and +0.1 % (Bitcoin) in return-RMSE — inside noise: more data made the models equal to '
         'the random walk rather than slightly worse, not better than it.'))
     f.append(P(
-        '<b>Status.</b> Working Streamlit dashboard (live forecast with uncertainty band, a <i>Predict-a-Day</i> demonstration on the '
-        'unseen test period that reveals the actual price and the error, a full prediction history, validation/test tables, regime '
-        'analysis and experiment tables) and FastAPI endpoints; reproducible pipeline (<font face="Mono">make pipeline</font>); '
-        'documentation for methodology, features, results, limitations, demonstration and viva.'))
+        '<b>Status.</b> Working Streamlit dashboard (one-click combined forecast with uncertainty band and every model\'s own '
+        'prediction, a <i>Predict-a-Day</i> demonstration on the unseen test period that reveals the actual price and the error, the '
+        'full test-set history, validation/test tables, regime analysis and experiment tables) and FastAPI endpoints; reproducible '
+        'pipeline (<font face="Mono">make pipeline</font>); documentation for methodology, features, results, limitations, '
+        'demonstration and viva.'))
     return f
 
 
@@ -301,7 +305,7 @@ def build_report():
         'Build a reproducible, leakage-free pipeline from raw market data to next-day forecasts for three assets.',
         'Engineer stationary, financially motivated features from price, volume, macro and sentiment data.',
         'Compare baseline, classical, tree-based and deep models under expanding-window walk-forward validation, '
-        'selecting hyper-parameters and the served model without touching the test set.',
+        'selecting hyper-parameters and comparing models without touching the test set.',
         'Evaluate once on an untouched test period with metrics that are meaningful for returns (RMSE/MAE/R² in return space, '
         'directional accuracy with a significance test, Diebold–Mariano test against the random walk, strategy backtest).',
         'Deliver a demonstrable application (dashboard + API) that communicates the forecast, its horizon, the model used, '
@@ -323,16 +327,16 @@ def build_report():
     F.append(KeepTogether([workflow_drawing(), Paragraph('Figure 1. End-to-end workflow. The test split is read by exactly one script.', S['caption'])]))
     F.append(table([
         ['Stage', 'Module', 'What it does'],
-        ['Data collection', 'src/data/data_collection.py, external_data.py', 'Daily OHLCV for the three assets; DXY, WTI, ^TNX, ^GSPC, ^VIX; Fear & Greed index'],
+        ['Data collection', 'src/data/data_collection.py, external_data.py, market_calendar.py', 'Daily OHLCV for the three assets; DXY, WTI, ^TNX, ^GSPC, ^VIX; Fear & Greed index; complete bars only'],
         ['Cleaning & features', 'src/data/preprocessing.py', 'De-duplication, trading-day calendar, log returns, indicators, ratio features, external alignment, frozen split, train-only scaler, build_dataset()'],
         ['EDA', 'src/data/eda.py', 'ADF tests on price vs return, ACF/PACF, return distributions, volatility clustering'],
         ['Models', 'src/models/registry.py, model_gru.py, model_lstm.py, ensemble_model.py', 'Uniform fit/predict interface for all models; two-phase fitting; stacked ensemble'],
         ['Tuning', 'src/training/tune_models.py', f'{CV_FOLDS}-fold expanding-window walk-forward grid search on train+val'],
         ['Training', 'src/training/train_models.py', 'Phase A (train → validation metrics, loss curves, importance) and phase B (refit on train+val)'],
-        ['Evaluation', 'src/evaluation/backtesting.py, cross_validation.py, plots.py', 'Single test-set evaluation, model selection, results tables, figures'],
-        ['Serving', 'src/inference/prediction.py, app/streamlit_app.py, src/api/app.py', 'Next-day forecast with context; dashboard; REST endpoints'],
+        ['Evaluation', 'src/evaluation/backtesting.py, cross_validation.py, plots.py', 'Single test-set evaluation of every model and of the combined forecast, CV comparison, results tables, figures'],
+        ['Serving', 'src/inference/prediction.py, app/streamlit_app.py, src/api/app.py', 'Combined next-day forecast (mean of six models) with context; dashboard; REST endpoints'],
         ['Experiments', 'src/experiments/run_experiments.py, before_after.py', 'E1 data size, E2 feature ablation, E3 horizon, E4 volatility (validation only); before/after on identical unseen days'],
-        ['Quality', 'tests/ (34 cases), .github/workflows/ci.yml, Dockerfile', 'Look-ahead (crypto + futures), close-time alignment, split/embargo, reconstruction, metrics, demo-inference tests; CI; container'],
+        ['Quality', 'tests/ (41 cases), .github/workflows/ci.yml, Dockerfile', 'Look-ahead (crypto + futures), close-time alignment, complete-bar rule, split/embargo, reconstruction, metrics, combined inference, failure modes; CI; container'],
     ], [2.6 * cm, 5.0 * cm, 8.8 * cm]))
     F.append(Paragraph('Table 1. Implemented components (source of truth: the repository).', S['caption']))
 
@@ -415,7 +419,7 @@ def build_report():
                'the training window while monitoring validation loss to find the stopping point (phase A — this also yields honest '
                'validation metrics and loss curves), then refitted on train+validation with that stopping point fixed (phase B — the deployed '
                'model). The validation data is therefore never inside its own early-stopping monitor.'))
-    hp = [['Asset', 'Served model & tuned parameters', 'Stopping point', 'Other tuned configurations']]
+    hp = [['Asset', 'Best single model by CV & tuned parameters', 'Stopping point', 'Other tuned configurations (all six are members of the served combination)']]
     bp = best['return_1d']
     for a in ASSETS:
         m = status[a]['primary_model']; p = bp[a][m]; fi = status[a]['fit_info']
@@ -436,12 +440,16 @@ def build_report():
                        'of a model lie within 0.4–2 % of each other while the fold-to-fold standard deviation is ≈ 20 % of the mean; early '
                        'stopping selected 10–82 boosting rounds for the metals\' LightGBM/CatBoost (Gold CatBoost 606 at learning-rate 0.01) and '
                        '1–9 epochs for the recurrent models: the data supports very little capacity.', S['caption']))
-    F.append(P('<b>Which model is served, and why.</b> Selection is automatic: the model with the lowest mean walk-forward RMSE of '
-               'the return on the train+val folds — CatBoost for Bitcoin and Gold, a GRU for Silver. All nine models lie within 0.4–0.5 % of '
-               'each other and within 0.35 % of the random walk on validation, so the ranking is not statistically decisive and is stated as '
-               'such. The served Silver GRU illustrates the point: its predictions have a standard deviation of 0.0009 against a realised 0.032 — '
-               'it is effectively a drift forecast that scored lowest on the folds. Boosted trees remain the practical choice (seconds to train, '
-               'feature importance); the recurrent models stop after 1–9 epochs because validation loss never improves.'))
+    F.append(P('<b>Which forecast is served, and why.</b> The dashboard and the API serve the <b>equal-weight '
+               'combination</b> of the six trained models: each predicts the next-day log return from the same input window, the six '
+               'predictions are averaged and the sign of the average is the UP/DOWN call. The single model with the lowest mean walk-forward '
+               'RMSE is still identified for comparison — CatBoost for Bitcoin and Gold, a GRU for Silver — but all six lie within 0.4–0.5 % of '
+               'each other and within 0.35 % of the random walk on validation, so choosing one \'winner\' would be choosing noise. Equal weights '
+               'are the standard robust choice for forecasts of similar quality (estimated combination weights rarely beat them out of sample), '
+               'nothing is fitted, so the combination cannot be tuned on the test set, and it is scored exactly like a single model: on the folds '
+               '(members\' out-of-fold predictions averaged) and once on the test set. The Silver GRU illustrates why a single winner would be '
+               'fragile: its predictions have a standard deviation of 0.0009 against a realised 0.032 — effectively a drift forecast that scored '
+               'lowest on the folds. The recurrent models stop after 1–9 epochs because validation loss never improves.'))
 
     # ---- 8 training & evaluation
     F.append(P('8. Training and Evaluation Methodology', 'h1'))
@@ -483,14 +491,17 @@ def build_report():
         ['Test set touched more than once', 'single script', 'backtesting.py is the only reader of the test split'],
         ['Multi-day target straddling a split', 'split by target dates', 'test_task_targets_are_future_only_and_embargoed'],
         ['Demo prediction seeing future rows', 'features.loc[:as_of] before scaling', 'test_predict_for_date_… perturbs every future row; forecast unchanged'],
+        ['Intraday snapshot used as a close', 'complete-bar rule at download time', 'test_drop_incomplete_bars_removes_todays_running_row'],
+        ['Combination weights tuned on test', 'equal weights, nothing fitted', 'test_combined_test_row_is_the_mean_of_its_members'],
     ], [4.2 * cm, 5.0 * cm, 7.2 * cm]))
-    F.append(Paragraph('Table 9. Data-leakage checklist enforced by the test suite (tests/, 34 cases, all passing).', S['caption']))
+    F.append(Paragraph('Table 9. Data-leakage checklist enforced by the test suite (tests/, 41 cases, all passing).', S['caption']))
 
     # ---- 9 results
     F.append(P('9. Experimental Results', 'h1'))
     F.append(P('Test period 2026-02-18 → 2026-09-12 for all assets (Bitcoin 207 days; Gold and Silver 143 exchange days). '
-               '"CV" columns are the walk-forward validation scores used for selection; the remaining columns are the single test-set '
-               'evaluation. The served model is marked "(served)". All values are from results/cv_results.csv and results/final_test_results.csv.'))
+               '"CV" columns are the walk-forward validation scores (the Combined row averages its members\' out-of-fold predictions); the '
+               'remaining columns are the single test-set evaluation. The served combined forecast is marked "(served)" and the best single '
+               'model by CV "(best single)". All values are from results/cv_results.csv and results/final_test_results.csv.'))
     for i, a in enumerate(ASSETS):
         F.append(KeepTogether([P(f'9.{i + 1} {a}', 'h2'), results_table(a),
                                Paragraph(f'Table {10 + i}. {a}: walk-forward validation and untouched test-set results, all models.', S['caption'])]))
@@ -498,17 +509,18 @@ def build_report():
                  'Figure 4. Test-set comparison: RMSE of the next-day return (red line = random walk) and directional accuracy (red line = 50 %).'))
     F.append(P('9.4 Interpretation', 'h2'))
     F += bullets([
-        '<b>All three assets are at the random-walk floor.</b> The served models\' return-RMSE is 0.0–0.6 % above the naive forecast '
-        '(Diebold–Mariano p = 0.74 Bitcoin, 0.71 Gold, 0.99 Silver); directional accuracy 46.9 % / 51.7 % / 55.2 % (binomial p = 0.83 / 0.37 / 0.12); '
-        'R² in return space −0.004 / −0.015 / −0.001. The tuned models are close to the unconditional drift, and the USD errors '
-        '(MAPE 1.53 / 1.30 / 2.48 %) equal the random walk\'s (1.52 / 1.29 / 2.49 %) because they measure the asset\'s volatility, not skill.',
+        '<b>All three assets are at the random-walk floor.</b> The served combined forecast\'s return-RMSE is 0.3 % below (Bitcoin, Silver) '
+        'or equal to (Gold) the naive forecast — not significant (Diebold–Mariano p = 0.49 / 0.97 / 0.46); the best single models are 0.0–0.6 % '
+        'above it (p = 0.74 / 0.71 / 0.99). Directional accuracy of the combination 46.9 % / 50.3 % / 53.8 % (binomial p = 0.83 / 0.50 / 0.20); '
+        'R² in return space +0.006 / −0.001 / +0.005. The tuned models are close to the unconditional drift, and the USD errors '
+        '(MAPE 1.52 / 1.29 / 2.47 %) equal the random walk\'s (1.52 / 1.29 / 2.49 %) because they measure the asset\'s volatility, not skill.',
         '<b>The one p &lt; 0.05 cell.</b> Silver LightGBM scores 58.7 % directional accuracy (p = 0.02) but has exactly the random walk\'s RMSE '
-        '(DM p = 0.98) and a walk-forward figure of 53.3 %; with 27 model-rows in the test table one such cell is what chance produces '
+        '(DM p = 0.98) and a walk-forward figure of 53.3 %; with 30 model-rows in the test table one such cell is what chance produces '
         '(Bonferroni threshold ≈ 0.002). It is not the validation winner and is not claimed.',
         '<b>The leak that was found and removed (Section 9.6).</b> An intermediate version of this system aligned the metals\' macro features '
         'same-day and reported 62.2 % directional accuracy for Silver (DM p = 0.002); Yahoo\'s futures close is the 13:30 ET settlement, so those '
         'features contained 1–3.5 hours of the target interval. Removing them dropped the figure to 51.7 %; the corrected alignment leaves the '
-        'served model at 55.2 %. Bitcoin, whose bar closes after the US close, was never affected — its numbers are identical before and after.',
+        'best single model at 55.2 % and the combination at 53.8 %. Bitcoin, whose bar closes after the US close, was never affected — its numbers are identical before and after.',
         '<b>Deep models.</b> GRU and LSTM are the weakest family on every asset in validation and not better than the random walk in test '
         '(early stopping after 1–12 epochs), even with 3× the earlier data.',
         '<b>Stacked ensemble.</b> With 3 years of data the non-negative meta-weights collapsed to zero; with the full history they are '
@@ -522,7 +534,7 @@ def build_report():
         '(training RMSE 0.0274 against 0.0335 for the random walk, with no validation gain).'])
 
     # ---- regime table
-    F.append(P('9.5 Performance across market regimes (test period, served model vs naive)', 'h2'))
+    F.append(P('9.5 Performance across market regimes (test period, served combined forecast vs naive)', 'h2'))
     rg = [['Asset', 'Regime', 'Days', 'MAE % served', 'MAE % naive', 'Direction hits %']]
     for a in ASSETS:
         for _, r in REG[(REG.asset == a) & (REG.regime_type != 'day_regime')].iterrows():
@@ -531,7 +543,7 @@ def build_report():
     t.setStyle(TableStyle([('ALIGN', (2, 1), (-1, -1), 'RIGHT')]))
     F.append(t)
     F.append(Paragraph('Table 13. Regimes are defined on the day the prediction is made (30-day volatility tercile; sign of the 20-day return). '
-                       'Errors scale with volatility for every asset; no served model improves on the naive forecast in any slice (results/regime_analysis.csv).', S['caption']))
+                       'Errors scale with volatility for every asset; the combined forecast does not improve on the naive forecast in any slice (results/regime_analysis.csv).', S['caption']))
 
     # ---- before / after
     F.append(P('9.6 Before vs after the improvement phase (identical unseen days 2026-02-18 → 2026-07-28)', 'h2'))
@@ -549,7 +561,7 @@ def build_report():
     t = table(ba, [1.6 * cm, 3.0 * cm, 1.9 * cm, 1.6 * cm, 1.7 * cm, 1.3 * cm, 1.7 * cm, 1.4 * cm, 1.9 * cm, 1.1 * cm], font=7.4)
     t.setStyle(TableStyle([('ALIGN', (3, 1), (-1, -1), 'RIGHT')]))
     F.append(t)
-    F.append(Paragraph('Table 14. Gold −0.6 %, Silver −0.4 %, Bitcoin +0.1 % return-RMSE — all inside noise. The served models now sit on the '
+    F.append(Paragraph('Table 14. Gold −0.6 %, Silver −0.4 %, Bitcoin +0.1 % return-RMSE — all inside noise. The best single models now sit on the '
                        'random-walk line instead of 0.6–1.5 % below it; the intermediate claim of a 2.8 % Silver improvement was the close-time leak. '
                        'This comparison reads the test rows a second time; it compares two frozen systems and selects nothing.', S['caption']))
 
@@ -593,49 +605,51 @@ def build_report():
         f"{e4[(e4.asset == 'Bitcoin') & (e4.model == 'Ridge')]['RMSE_vs_persistence_pct'].iloc[0]:+.1f} % vs persistence) but only marginally better than a RiskMetrics EWMA "
         f"({e4[(e4.asset == 'Bitcoin') & (e4.model == 'EWMA')]['RMSE_vs_persistence_pct'].iloc[0]:+.1f} %) and worse than EWMA for Silver — documented, not productised."])
     F.append(fig(os.path.join(FIGURES_DIR, 'silver_actual_vs_predicted.png'), 15.2,
-                 'Figure 5. Silver test period, served GRU: predicted vs actual next-day returns (top, scatter middle) and the price view (bottom). '
+                 'Figure 5. Silver test period, served combined forecast: predicted vs actual next-day returns (top, scatter middle) and the price view (bottom). '
                  'A price line always tracks the actual with a one-day lag; skill — or, here, its absence — is only visible in return space.', max_height_cm=12.5))
     F.append(fig(os.path.join(FIGURES_DIR, 'overfitting_gap.png'), 15.0,
                  'Figure 6. Train vs validation RMSE per model with the random walk\'s train/validation levels (dotted/dashed).'))
     F.append(fig(os.path.join(FIGURES_DIR, 'gold_feature_importance.png'), 10.5,
-                 'Figure 7. Gold, served CatBoost: normalised feature importance (the served Silver GRU exposes none).'))
+                 'Figure 7. Gold, CatBoost (the best single model by CV, a member of the combination): normalised feature importance; the recurrent members expose none.'))
 
     # ---- 10 application
     F.append(P('10. Final System and Application', 'h1'))
     F.append(P('The Streamlit dashboard (<font face="Mono">make serve</font>, port 8501) and the FastAPI service '
                '(<font face="Mono">make api</font>, port 8000) sit on the same inference module. Inference scales the features up to the '
-               'chosen day with the train-fitted scaler, runs the requested model on the last 30 rows, un-standardises the predicted return and '
-               'converts it to a price. The <i>Predict a Day</i> tab is the demonstration: stand on any day of the unseen test period, generate '
-               'the next-day forecast from data up to that day only, then reveal the actual close, the error in dollars and percent, and the '
-               'direction hit — highlighted on the actual-vs-predicted chart, with every other model\'s forecast for the same day. The '
-               '<i>Prediction History</i> tab lists every unseen day with predicted, actual, error and hit/miss, plus MAE and hit-rate KPIs. '
-               'A "Sync Live Market Data" button refreshes features into a separate live file so the frozen evaluation data is never overwritten.'))
+               'chosen day with the train-fitted scaler, runs all six models on the last 30 rows, un-standardises each predicted return, '
+               'averages them and converts the result to a price; the user never chooses a model. <i>Run prediction</i> downloads the last '
+               'complete bar and shows one final card (predicted close, UP/DOWN, change, ±1 RMSE band) with every member\'s own prediction. '
+               'The <i>Predict a Day</i> tab is the demonstration: stand on any day of the unseen '
+               'test period, generate the combined forecast from data up to that day only, then reveal the actual close, the error in dollars '
+               'and percent, and HIT/FAIL — highlighted on the actual-vs-predicted chart, with each member\'s forecast for the same day. The '
+               '<i>Test-Set History</i> tab lists every unseen day with predicted, actual, error and HIT/FAIL, plus MAE and hit-rate KPIs. Live downloads go '
+               'to a separate file so the frozen evaluation data is never overwritten.'))
     F.append(table([
         ['Implemented (verified running)', 'Not implemented (future possibilities)'],
         ['• Select Bitcoin / Gold / Silver; price chart with train/val/test shading; Bollinger, RSI, MACD, volume overlays<br/>'
-         '• <b>Predict a Day (unseen test)</b>: choose any test day → predicted close, actual close, error $ and %, direction hit/miss, chart highlight, all models on that day<br/>'
-         '• <b>Prediction History</b>: every unseen day with predicted / actual / error / hit, MAE and hit-rate KPIs, CSV download<br/>'
-         '• Run a next-day prediction with the served model or any trained model: current close, predicted close, % change, direction, '
-         'horizon (T+1), model name, ±1 RMSE uncertainty band, held-out metrics of that model, disclaimer<br/>'
-         '• Forecast-horizon chart (last 60 days + next day); table of all trained models\' predictions on the same input<br/>'
+         '• <b>Run prediction</b>: all six models on the last complete bar → one combined next-day forecast (current close, predicted close, '
+         '% change, UP/DOWN, ±1 RMSE band, held-out metrics, disclaimer), each member\'s prediction<br/>'
+         '• <b>Predict a Day (unseen test)</b>: choose any test day → combined predicted close, actual close, error $ and %, HIT/FAIL, chart highlight, each model on that day<br/>'
+         '• <b>Test-Set History</b>: every unseen day with predicted / actual / error / HIT-FAIL, MAE and hit-rate KPIs, CSV download<br/>'
+         '• Forecast-horizon chart (last 60 days + next day)<br/>'
          '• Validation view: actual vs predicted returns and prices over the test period; return scatter<br/>'
          '• Performance tab: walk-forward and test tables, honest-reading summary, regime table, experiment tables (E1–E4), report figures<br/>'
-         '• Methodology tab: task, split, features, models, served-model parameters, model inventory<br/>'
-         '• API: GET /health, GET /models, GET /predict/{asset}[?model=…]; Docker Compose for both services<br/>'
+         '• Methodology tab: task, split, features, models, how the combination works, best single model\'s parameters<br/>'
+         '• API: GET /health, GET /models, GET /predict/{asset}[?model=…], GET /forward; Docker Compose for both services<br/>'
          '• Deep links: ?asset=Gold&amp;run=1',
          '• Multi-day horizons or volatility forecasts<br/>• Calibrated prediction intervals (the band is an ex-post error band)<br/>'
-         '• User accounts, saved forecasts, database<br/>• Automatic scheduled retraining in production<br/>'
+         '• User accounts, saved forecasts, database<br/>• Automatic scheduled prediction or retraining<br/>'
          '• News / NLP sentiment for the metals<br/>• Intraday data<br/>• Trading execution or portfolio management'],
     ], [10.8 * cm, 5.6 * cm]))
     F.append(Paragraph('Table 15. Application functionality.', S['caption']))
     demo_crop = crop_image(os.path.join(DOC_FIG, 'dash_demo_silver.png'), os.path.join(DOC_FIG, 'dash_demo_silver_crop.png'), (0, 0, 2100, 2150))
-    F.append(fig(demo_crop, 15.0, 'Figure 8. Dashboard, Silver — Predict a Day: the served GRU stands on 2026-09-10, predicts $64.34 for 2026-09-11 '
-                 'from data up to that day, the actual close ($64.55) is revealed, error −0.33 %, direction hit; all seven models on the same day '
-                 'below, within $0.08 of each other (screenshot of the running application).', max_height_cm=16.0))
+    F.append(fig(demo_crop, 15.0, 'Figure 8. Dashboard, Silver — Predict a Day: all six models stand on 2026-09-10, their combined forecast for '
+                 '2026-09-11 is generated from data up to that day, the actual close is revealed with the error and HIT/FAIL; each member\'s '
+                 'prediction for the same day below (screenshot of the running application).', max_height_cm=16.0))
     hist_crop = crop_image(os.path.join(DOC_FIG, 'dash_history_silver.png'), os.path.join(DOC_FIG, 'dash_history_silver_crop.png'), (0, 0, 2100, 1500))
-    F.append(fig(hist_crop, 15.0, 'Figure 9. Dashboard, Silver — Prediction History: every unseen day with predicted, actual, error and hit/miss; MAE and hit-rate KPIs.', max_height_cm=11.5))
+    F.append(fig(hist_crop, 15.0, 'Figure 9. Dashboard, Silver — Test-Set History: every unseen day with the combined forecast\'s predicted, actual, error and HIT/FAIL; MAE and hit-rate KPIs.', max_height_cm=11.5))
     perf_crop = crop_image(os.path.join(DOC_FIG, 'dash_performance.png'), os.path.join(DOC_FIG, 'dash_performance_crop.png'), (0, 0, 2100, 1700))
-    F.append(fig(perf_crop, 15.0, 'Figure 10. Dashboard — Model Performance tab with the walk-forward and test tables generated by the evaluation script.', max_height_cm=12.5))
+    F.append(fig(perf_crop, 15.0, 'Figure 10. Dashboard — Model Performance tab with the test table (Combined row marked as served) and the honest-reading box generated from the evaluation files.', max_height_cm=12.5))
 
     # ---- 11 improvements
     F.append(P('11. Improvements Made During the Audit', 'h1'))
@@ -650,10 +664,11 @@ def build_report():
         ['Features', 'Raw price levels (open/high/low/close/EMA/BB/VWAP) as inputs — test values 1.7–2.4× outside the training range', 'Stationary ratio features; redundant indicators removed; gold return added for silver'],
         ['Model', 'Served "stacked ensemble" had coefficients ≈ 0 (Bitcoin exactly [0,0,0]) — a constant predictor, never evaluated on test; 2×100-unit GRU/LSTM over-fitted', 'Uniform registry of 10 models; validation-based selection; small tunable GRU/LSTM; stack kept as a reported experiment'],
         ['Evaluation', 'R² ≈ 0.94–0.97 on price levels presented as skill; naive baseline beat every model but was not acknowledged; directional accuracy mis-computed (naive 0 %)', 'Return-space metrics; correct directional accuracy with p-values; Diebold–Mariano test; strategy backtest; over-fitting gap; honest reporting'],
-        ['Serving', 'CLI/API crashed (LightGBM given 900 features; float(dict)); dashboard listed stale LSTM and a non-existent Ensemble path', 'Rewritten inference, API and dashboard around the served model with context and disclaimer; verified in the browser'],
+        ['Serving', 'CLI/API crashed (LightGBM given 900 features; float(dict)); dashboard listed stale LSTM and a non-existent Ensemble path', 'Rewritten inference, API and dashboard around one served forecast with context and disclaimer; verified in the browser'],
         ['Code & docs', 'Five stale result files from an earlier pipeline; Makefile/CI referenced missing scripts; 4 of 31 tests failed; README claimed models/indicators that did not exist', 'Single results/ tree; working Makefile/CI/retrain; 31 passing tests; accurate README and docs/; bit-identical reproducibility'],
         ['Improvement phase', '3 years of data; no measured design decisions; forecast shown without a way to verify it', '2018 → data (2.9×); HAR/EWMA volatility and momentum features; per-task tuning; logged experiments E1–E4; before/after on identical days; Predict-a-Day demo and prediction history'],
         ['Final audit', 'Same-day macro and session High/Low features for the metals against a 13:30 ET settlement close → a spurious 62 % Silver result; live sync overwrote frozen raw files; make targets missing a path bootstrap', 'Close-time rule (previous-day macro, lagged High/Low for metals) with unit tests; pipeline re-run; contaminated results archived; live downloads isolated in data/raw_live/; reproducible make targets'],
+        ['Pre-expo audit', 'Model selector in the UI; frozen Bitcoin file ended on an intraday snapshot; silent wrong scale if the evaluation file was missing', 'Served forecast = equal-weight combination of all six models, evaluated like every model; complete-bar rule at download time; explicit failure modes; 41 tests'],
     ], [2.6 * cm, 7.4 * cm, 6.4 * cm], font=7.8))
     F.append(Paragraph('Table 16. Before vs final implementation (docs/FIX_PLAN.md, docs/AUDIT_SUMMARY.md, docs/RESULTS.md §2–3).', S['caption']))
 
@@ -664,7 +679,7 @@ def build_report():
         'horizon the predictable component is small and unstable, and the results are consistent with that.',
         '<b>One test window, many comparisons.</b> 8.6 years of training data removed the worst of the small-sample problem, but the unseen window is still a '
         'single 5–7-month period (143–207 days): a few percent in RMSE and directional accuracies of 52–57 % are not statistically detectable, '
-        'and with 27 model-rows in the test table one cell at p ≈ 0.02 is expected by chance.',
+        'and with 30 model-rows in the test table one cell at p ≈ 0.02 is expected by chance.',
         '<b>Regime shift in the test window.</b> The 2026 window is far more volatile than the 2018–2025 average (validation RMSE 2–3× training for '
         'the metals, for the random walk as well as for the models); one window is a single draw from a non-stationary process.',
         '<b>Data quality.</b> Front-month futures (roll effects; unusable volume), a composite BTC index, forward-filled macro series on holidays, '
@@ -684,10 +699,12 @@ def build_report():
                'scientifically defensible. The final system has a leakage-audited, reproducible pipeline; ten model families compared '
                'under expanding-window walk-forward validation on identical days; a single, statistically tested evaluation on an untouched '
                'period; an evaluator-facing demonstration that predicts any unseen day and reveals the actual value and the error; and a '
-               'dashboard and API that serve the validation-selected model together with its measured error. The empirical answer with 8.6 '
-               'years of data is unambiguous and honest: for Bitcoin, Gold and Silver no statistical, tree-based or recurrent model beats the '
-               'random walk at a one-day horizon (served models 0.0–0.6 % above the naive RMSE, Diebold–Mariano p ≥ 0.71, directional accuracy '
-               '47–55 %). The 2.9× larger training set moved the models from slightly below the random walk onto it, not above it. The value of '
+               'dashboard and API that serve the equal-weight combination of the six trained models together with its measured error. The '
+               'empirical answer with 8.6 '
+               'years of data is unambiguous and honest: for Bitcoin, Gold and Silver neither any statistical, tree-based or recurrent model nor '
+               'their combination beats the random walk at a one-day horizon (combined forecast within ±0.3 % of the naive RMSE, Diebold–Mariano '
+               'p ≥ 0.46, directional accuracy 47–54 %). The 2.9× larger training set moved the models from slightly below the random walk onto '
+               'it, not above it. The value of '
                'the work lies in the rigour of the evaluation — in showing why the original "R² ≈ 0.95" was an illusion, and in finding and '
                'removing a close-time leak in its own intermediate version that had manufactured a "significant" 62 % result — rather than in a '
                'claimed forecasting edge.')]))
@@ -733,28 +750,28 @@ def build_summary():
         ['Split', f'train ≤ {TRAIN_END} · validation ≤ {VAL_END} · unseen test 2026-02-18 → 2026-09-12 (207 / 143 / 143 days), chronological, evaluated once'],
         ['Validation', f'{CV_FOLDS}-fold expanding-window walk-forward on train+val for tuning and model selection'],
         ['Models', 'Naive random walk, historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM, stacked ensemble'],
-        ['Served model', 'CatBoost for Bitcoin and Gold, GRU for Silver (walk-forward validation winners; all within 0.35 % of the random walk on validation)'],
+        ['Served forecast', 'Equal-weight combination of the six trained models (evaluated on the folds and on the test set like every model); best single models by CV: CatBoost for Bitcoin and Gold, GRU for Silver (all within 0.35 % of the random walk on validation)'],
         ['Metrics', 'MAE/RMSE/MAPE ($), RMSE/MAE/R² (return), directional accuracy + binomial p, Diebold–Mariano vs random walk, strategy backtest'],
-        ['Stack', 'Python 3.9, pandas, scikit-learn, LightGBM, CatBoost, TensorFlow/Keras, statsmodels, Streamlit, FastAPI, Docker, pytest (34 cases), GitHub Actions'],
-        ['Demo', 'Predict-a-Day on the unseen test period (predicted vs actual vs error), prediction history, live forecast with uncertainty band'],
+        ['Stack', 'Python 3.9, pandas, scikit-learn, LightGBM, CatBoost, TensorFlow/Keras, statsmodels, Streamlit, FastAPI, Docker, pytest (41 cases), GitHub Actions'],
+        ['Demo', 'One-click combined forecast with uncertainty band; Predict-a-Day on the unseen test period (predicted vs actual vs error vs HIT/FAIL); test-set history'],
     ], [3.0 * cm, 13.4 * cm]))
     F.append(P('Headline test-set results', 'h2'))
     d = [['Asset', 'Model', 'MAE ($)', 'RMSE ($)', 'MAPE %', 'R² (return)', 'Dir. acc. % (p)', 'DM p vs naive']]
     for a in ASSETS:
-        for m in ('Naive', status[a]['primary_model']):
+        for m in ('Naive', 'Combined', status[a]['primary_model']):
             r = row(a, m)
-            d.append([a, NICE.get(m, m) + (' (served)' if m != 'Naive' else ''), f"{r['MAE_usd']:,.2f}", f"{r['RMSE_usd']:,.2f}", f"{r['MAPE_usd']:.2f}",
+            d.append([a, NICE.get(m, m) + (' (served)' if m == 'Combined' else (' (best single)' if m != 'Naive' else '')), f"{r['MAE_usd']:,.2f}", f"{r['RMSE_usd']:,.2f}", f"{r['MAPE_usd']:.2f}",
                       f"{r['R2_ret']:+.3f}", '—' if m == 'Naive' else f"{r['DirAcc_pct']:.1f} ({r['DirAcc_pvalue']:.2f})",
                       '—' if m == 'Naive' else f"{r['DM_pvalue']:.2f}"])
     t = table(d, [1.7 * cm, 3.6 * cm, 1.8 * cm, 1.9 * cm, 1.6 * cm, 2.0 * cm, 2.6 * cm, 2.2 * cm])
     t.setStyle(TableStyle([('ALIGN', (2, 1), (-1, -1), 'RIGHT')]))
     F.append(t)
-    F.append(Paragraph('Unseen test period 2026-02-18 → 2026-09-12. Full 10-model tables: results/FINAL_RESULTS.md and the main report.', S['caption']))
+    F.append(Paragraph('Unseen test period 2026-02-18 → 2026-09-12. Full 11-row tables: results/FINAL_RESULTS.md and the main report.', S['caption']))
     F.append(P('Reading the numbers', 'h2'))
     F.append(P('R² is reported on returns, where 0 means "as good as predicting the mean". The original project reported R² ≈ 0.95 on '
-               'price levels — a value the random walk also achieves, which is why it was misleading. For Bitcoin and Gold the served models\' '
-               'errors do not differ significantly from the random walk\'s (DM p = 0.74, 0.71). For Silver the served GRU is indistinguishable '
-               'from the random walk (DM p = 0.99; 55 % direction, p = 0.12). An intermediate version showed 62 % for Silver; the final audit '
+               'price levels — a value the random walk also achieves, which is why it was misleading. The served combined forecast\'s errors '
+               'do not differ significantly from the random walk\'s for any asset (DM p = 0.49 Bitcoin, 0.97 Gold, 0.46 Silver; direction '
+               '47 / 50 / 54 %, none significant). An intermediate version showed 62 % for Silver; the final audit '
                'traced it to same-day macro features being used against a 13:30 ET futures settlement close, fixed the alignment and re-ran '
                'everything. On identical unseen days the improvement phase moved return-RMSE by −0.6 % (Gold), −0.4 % (Silver) and +0.1 % '
                '(Bitcoin) — inside noise; 2.9× more data made the models equal to the random walk, not better than it.'))

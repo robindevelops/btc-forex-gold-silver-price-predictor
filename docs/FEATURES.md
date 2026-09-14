@@ -1,6 +1,6 @@
 # Feature Dictionary
 
-All features are computed in `src/data/preprocessing.py::DataCleaner` at trading day *t* from data available **at the moment `P_t` is observed** — the 00:00 UTC bar close for Bitcoin, the 13:30 ET COMEX settlement for Gold/Silver (`docs/METHODOLOGY.md §2`, "close-time rule"). `P` = close, `H`/`L` = high/low, `V` = volume, `r_t = ln(P_t / P_{t−1})`. Rows marked **†** are lagged one session for the metals because Yahoo's futures High/Low extend past the settlement; rows marked **‡** use the previous trading day's value for the metals because those markets close after the 13:30 settlement.
+All features are computed in `src/data/preprocessing.py::DataCleaner` at trading day *t* from **complete daily bars only** (the running bar of the current day is dropped at download time, `src/data/market_calendar.py`) and from data available **at the moment `P_t` is observed** — the 00:00 UTC bar close for Bitcoin, the 13:30 ET COMEX settlement for Gold/Silver (`docs/METHODOLOGY.md §2`, "close-time rule"). `P` = close, `H`/`L` = high/low, `V` = volume, `r_t = ln(P_t / P_{t−1})`. Rows marked **†** are lagged one session for the metals because Yahoo's futures High/Low extend past the settlement; rows marked **‡** use the previous trading day's value for the metals because those markets close after the 13:30 settlement.
 
 ## Model inputs (stationary)
 
