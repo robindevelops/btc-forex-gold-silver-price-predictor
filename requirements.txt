@@ -40,5 +40,5 @@ pytest>=7.0.0
 # Notebooks
 jupyter==1.1.1
 
-# Report generation (docs/build_report.py)
+# Report generation (PDF)
 reportlab>=4.0

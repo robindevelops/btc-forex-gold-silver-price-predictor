@@ -23,4 +23,4 @@ random-walk floor with and without the leak.
 
 The corrected pipeline (`config.EXTERNAL_SAME_DAY`, `config.POST_SETTLEMENT_FEATURES`,
 `DataCleaner._align_external`, `DataCleaner.lag_post_settlement_features`) and its results live in `results/`.
-See `docs/METHODOLOGY.md` ("close-time rule") and `docs/RESULTS.md §2`.
+See `docs/FYP_Technical_Report.pdf` §11 ("close-time rule") and §15.2.

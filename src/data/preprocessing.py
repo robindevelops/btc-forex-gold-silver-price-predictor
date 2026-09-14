@@ -1,7 +1,7 @@
 """
 Data cleaning, feature engineering, chronological split and scaling.
 
-Design rules (see docs/METHODOLOGY.md):
+Design rules (see docs/FYP_Technical_Report.pdf, Sections 7–11):
   * Every feature at row t uses only information available at the moment P_t is observed
     (BTC: 00:00 UTC bar close; GC=F/SI=F: the 13:30 ET COMEX settlement — see config.EXTERNAL_SAME_DAY).
   * The target is the NEXT row's log return (created in `create_sequences`), never a feature.

@@ -1,4 +1,4 @@
-.PHONY: install test collect-data preprocess eda tune train stack evaluate figures experiments report pipeline serve api docker-build docker-run clean
+.PHONY: install test collect-data preprocess eda tune train stack evaluate figures experiments pipeline serve api docker-build docker-run clean
 
 PY ?= python
 
@@ -36,9 +36,6 @@ figures:                 ## report figures into results/figures/
 experiments:             ## design experiments (validation only) + before/after comparison on identical unseen days
 	$(PY) src/experiments/run_experiments.py
 	$(PY) src/experiments/before_after.py
-
-report:                  ## regenerate docs/FYP_Final_Report.pdf and docs/Executive_Summary.pdf
-	$(PY) docs/build_report.py
 
 pipeline: preprocess eda tune train stack evaluate figures experiments test   ## full reproducible run from raw data
 

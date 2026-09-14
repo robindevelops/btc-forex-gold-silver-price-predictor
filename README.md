@@ -7,19 +7,19 @@
 ## What the project does
 
 1. Downloads daily OHLCV for **BTC-USD**, **GC=F** (gold futures) and **SI=F** (silver futures) from 2018 plus macro series (DXY, WTI, 10-y yield, S&P 500, VIX) and the crypto Fear & Greed index — **complete bars only** (the running bar of the current day is dropped).
-2. Engineers **stationary, backward-looking features** (returns and 20-day momentum, rolling/HAR/EWMA volatility, RSI/ADX/ROC, normalised MACD, EMA ratios, Bollinger %B/width, ATR/price, macro returns, sentiment) under a **close-time rule**: a feature may only use what is known when the asset's daily close is fixed — same-day macro values for Bitcoin (00:00 UTC bar), previous-day values for the metals (13:30 ET COMEX settlement) — `docs/FEATURES.md`.
+2. Engineers **stationary, backward-looking features** (returns and 20-day momentum, rolling/HAR/EWMA volatility, RSI/ADX/ROC, normalised MACD, EMA ratios, Bollinger %B/width, ATR/price, macro returns, sentiment) under a **close-time rule**: a feature may only use what is known when the asset's daily close is fixed — same-day macro values for Bitcoin (00:00 UTC bar), previous-day values for the metals (13:30 ET COMEX settlement) (the feature dictionary is Table 8 of `docs/FYP_Technical_Report.pdf`).
 3. Predicts the **next-day log return** `y = ln(P_{t+1}/P_t)` and converts it to a price.
 4. Compares **Naive (random walk), historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM and a stacked ensemble** under **expanding-window walk-forward validation**, tunes hyper-parameters on validation only, and evaluates the untouched test set **once** with return-space metrics, directional accuracy with significance, a Diebold–Mariano test against the random walk, and a strategy backtest.
 5. Serves one **combined forecast** — the equal-weight mean of all six trained models, so the user never picks a model — in a **Streamlit dashboard** (Run prediction, **Predict-a-Day demo on the unseen test period**, test-set history, performance and methodology tabs) and a **FastAPI** endpoint, always alongside its held-out metrics, an uncertainty band and a disclaimer.
 6. Logs design experiments — data size, feature ablation, horizon, volatility target — and a before/after comparison on identical unseen days (`results/experiments/`).
 
-The central research question is honest: *does any model beat the random walk at a one-day horizon, and by how much?* Answer (`docs/RESULTS.md`): **no — not for Bitcoin, Gold or Silver.** The served combined forecast's return-RMSE is within ±0.3 % of the random walk's on the unseen 2026 test window (Diebold–Mariano p = 0.46–0.97), directional accuracy 47–54 % (none significant); no single model does better. An intermediate version reported 62 % for Silver; the final audit traced it to a close-time leak (same-day macro features against a 13:30 ET futures settlement), fixed it and re-ran everything (`docs/RESULTS.md §2`).
+The central research question is honest: *does any model beat the random walk at a one-day horizon, and by how much?* Answer (`docs/FYP_Technical_Report.pdf` §14–15): **no — not for Bitcoin, Gold or Silver.** The served combined forecast's return-RMSE is within ±0.3 % of the random walk's on the unseen 2026 test window (Diebold–Mariano p = 0.46–0.97), directional accuracy 47–54 % (none significant); no single model does better. An intermediate version reported 62 % for Silver; the final audit traced it to a close-time leak (same-day macro features against a 13:30 ET futures settlement), fixed it and re-ran everything (`docs/FYP_Technical_Report.pdf` §11 and §15.2).
 
 ## Results at a glance
 
-See **`docs/RESULTS.md`** (interpretation) and **`results/FINAL_RESULTS.md`** (auto-generated tables). Figures are in `results/figures/`.
+See **`docs/FYP_Technical_Report.pdf`** (complete technical report, interpretation in §14–15) and **`results/FINAL_RESULTS.md`** (auto-generated tables). Figures are in `results/figures/`.
 
-**Final report:** `docs/FYP_Final_Report.pdf` and `docs/Executive_Summary.pdf`, both generated from the result files by `python docs/build_report.py`. **Demo script:** `docs/DEMO_GUIDE.md`.
+**Final report:** `docs/FYP_Technical_Report.pdf` — the complete technical report (data, features, models, evaluation, dashboard, limitations); every table in it was generated from the result files.
 
 ## Project structure
 
@@ -53,7 +53,7 @@ See **`docs/RESULTS.md`** (interpretation) and **`results/FINAL_RESULTS.md`** (a
 │   └── utils/                   metrics (DM test, directional accuracy, backtest), reconstruction, seeds, logging
 ├── tests/                     41 test cases: look-ahead (crypto + futures), close-time alignment, complete-bar rule, target alignment, split, reconstruction, metrics, combined inference, failure modes
 ├── results/                   cv_results.csv · final_test_results.csv · regime_analysis.csv · FINAL_RESULTS.md · tuning/ · figures/ · predictions/ · experiments/ · archive_3y_final/ · archive_sameday_macro_leak/
-├── docs/                      METHODOLOGY · FEATURES · RESULTS · LIMITATIONS · VIVA_QA · DEMO_GUIDE · REPORT_STRUCTURE · FIX_PLAN · AUDIT_SUMMARY
+├── docs/                      FYP_Technical_Report.pdf — the complete technical report
 ├── notebooks/                 companion notebooks (load and display the script outputs)
 └── data/                      raw/ processed/ models/  (git-ignored except model_status.json)
 ```
@@ -81,7 +81,7 @@ make api            # uvicorn API          →  http://localhost:8000/docs
 
 ## Methodology in one paragraph
 
-Chronological split by the dates the target covers (train ≤ 2025-09-10, validation ≤ 2026-02-17, test = rest, exact embargo for multi-day targets), no shuffling; scaler fitted on train only; only complete daily bars; Gold/Silver keep their exchange calendar (no synthetic weekend rows); every feature at day *t* uses only information known when the day-*t* close is fixed — same-day macro data for Bitcoin, previous-day macro data and previous-session High/Low for the metals, whose Yahoo close is the 13:30 ET settlement (tested); the target is the next row's log return and never appears in the input window (tested); hyper-parameters are chosen by 4-fold expanding-window walk-forward validation inside train+val; the served forecast is the equal-weight combination of the six trained models (no fitted weights, so nothing is selected on the test set), evaluated on the folds and once on the test set like every single model; the test set is read by exactly one script. Full detail: `docs/METHODOLOGY.md`.
+Chronological split by the dates the target covers (train ≤ 2025-09-10, validation ≤ 2026-02-17, test = rest, exact embargo for multi-day targets), no shuffling; scaler fitted on train only; only complete daily bars; Gold/Silver keep their exchange calendar (no synthetic weekend rows); every feature at day *t* uses only information known when the day-*t* close is fixed — same-day macro data for Bitcoin, previous-day macro data and previous-session High/Low for the metals, whose Yahoo close is the 13:30 ET settlement (tested); the target is the next row's log return and never appears in the input window (tested); hyper-parameters are chosen by 4-fold expanding-window walk-forward validation inside train+val; the served forecast is the equal-weight combination of the six trained models (no fitted weights, so nothing is selected on the test set), evaluated on the folds and once on the test set like every single model; the test set is read by exactly one script. Full detail: `docs/FYP_Technical_Report.pdf` §7–13.
 
 ## API
 

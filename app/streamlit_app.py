@@ -616,6 +616,6 @@ binomial p-value against 50 %; Diebold–Mariano test of squared errors against 
                                       f"{cv_best or '—'} ({status.get('selection_rule', '—')})", stop,
                                       ', '.join(f"{k} = {v}" for k, v in (status.get('params') or {}).items())]})
     st.dataframe(details, width='stretch', hide_index=True)
-    st.caption("Full detail: `docs/METHODOLOGY.md`, `docs/FEATURES.md`, `docs/RESULTS.md`.")
+    st.caption("Full detail: `docs/FYP_Technical_Report.pdf`.")
 
 st.markdown(f"<div class='footer'>{DISCLAIMER}</div>", unsafe_allow_html=True)

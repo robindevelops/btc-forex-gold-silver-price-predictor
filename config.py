@@ -37,7 +37,7 @@ def get_prefix(asset_name):
     return ASSET_CONFIG[asset_name]['prefix']
 
 # History to download. Yahoo Finance supports much longer histories; more data is
-# the single most effective improvement available (see docs/LIMITATIONS.md).
+# the single most effective improvement available (see docs/FYP_Technical_Report.pdf, Limitations).
 DATA_START_DATE = '2018-01-01'
 
 # ---------------------------------------------------------------------------
