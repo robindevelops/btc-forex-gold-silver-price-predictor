@@ -1,4 +1,4 @@
-.PHONY: install test collect-data preprocess eda tune train stack evaluate figures experiments pipeline serve api docker-build docker-run clean
+.PHONY: install test collect-data preprocess eda tune train stack evaluate figures experiments pipeline serve api clean
 
 PY ?= python
 
@@ -47,12 +47,6 @@ serve:
 
 api:
 	uvicorn src.api.app:app --reload
-
-docker-build:
-	docker build -t crypto-forex-predictor .
-
-docker-run:
-	docker-compose up -d
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
