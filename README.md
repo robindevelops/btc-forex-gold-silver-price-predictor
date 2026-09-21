@@ -17,9 +17,20 @@ The central research question is honest: *does any model beat the random walk at
 
 ## Results at a glance
 
-See **`docs/FYP_Technical_Report.pdf`** (complete technical report, interpretation in §14–15) and **`results/FINAL_RESULTS.md`** (auto-generated tables). Figures are in `results/figures/`.
+Served (Combined) forecast vs the random walk on the untouched test set (`results/final_test_results.csv`, evaluated once; MAE/RMSE/MAPE in USD, RMSE and R² of the log return, DA = direction correct on non-flat days with its one-sided binomial p, "UP calls" = share of days the forecast said UP, DM = Diebold–Mariano p vs the random walk):
 
-**Final report:** `docs/FYP_Technical_Report.pdf` — the complete technical report (data, features, models, evaluation, dashboard, limitations); every table in it was generated from the result files.
+| Asset | Test days | Forecast | MAE ($) | RMSE ($) | MAPE | RMSE (ret) | R² (ret) | DA (p) | UP calls / up days | DM p |
+|---|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| Bitcoin | 207 | **Combined** | 1,063.94 | 1,447.37 | 1.52 % | 0.02072 | +0.006 | 46.9 % (0.83) | 37 % / 49 % | 0.49 |
+| | | Random walk | 1,066.42 | 1,451.73 | 1.52 % | 0.02079 | −0.001 | — | — | — |
+| Gold | 143 | **Combined** | 58.20 | 75.73 | 1.29 % | 0.01671 | −0.001 | 50.3 % (0.50) | 97 % / 50 % | 0.97 |
+| | | Random walk | 58.26 | 75.76 | 1.29 % | 0.01671 | −0.002 | — | — | — |
+| Silver | 143 | **Combined** | 1.78 | 2.37 | 2.47 % | 0.03180 | +0.005 | 53.8 % (0.20) | 91 % / 52 % | 0.46 |
+| | | Random walk | 1.79 | 2.37 | 2.49 % | 0.03189 | −0.001 | — | — | — |
+
+Reading: every error metric is within ±0.4 % of the random walk (no difference is significant), R² of the return is ≈ 0, and no directional hit-rate is significantly above 50 %. The predicted returns have a standard deviation of ~0.1 % against ~2 % for actual returns — the models have learned that the next-day move is essentially unpredictable and stay near "no change". For Gold and Silver the forecast says UP on 91–97 % of days, so its direction call is the assets' average drift rather than a timing signal. Full tables (every model, walk-forward folds, regimes, experiments) in **`results/FINAL_RESULTS.md`**; interpretation in **`docs/FYP_Technical_Report.pdf`** §14–15; figures in `results/figures/`.
+
+**Final report:** `docs/FYP_Technical_Report.pdf` — the complete technical report (data, features, models, evaluation, dashboard, limitations); every table in it was generated from the result files (the "UP calls" column above was added in the final audit and is not in the PDF's tables).
 
 ## Project structure
 
@@ -73,6 +84,7 @@ make evaluate       # the single test-set evaluation + model selection
 make figures        # report figures
 make experiments    # design experiments + before/after comparison (validation only)
 make test           # test suite
+make predict        # print today's combined next-day forecast for every asset
 make serve          # streamlit dashboard  →  http://localhost:8501
 make api            # uvicorn API          →  http://localhost:8000/docs
 ```

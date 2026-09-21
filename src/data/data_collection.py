@@ -50,13 +50,6 @@ def fetch_asset(asset_name, start=DATA_START_DATE, out_dir=RAW_DATA_DIR):
     return df
 
 
-# Backwards-compatible helpers
-fetch_bitcoin_data = lambda **k: fetch_asset('Bitcoin')
-fetch_gold_data = lambda: fetch_asset('Gold')
-fetch_silver_data = lambda: fetch_asset('Silver')
-fetch_forex_data = fetch_asset
-
-
 def verify_data(df, asset_name):
     if df.empty:
         return

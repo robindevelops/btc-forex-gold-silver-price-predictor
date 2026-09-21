@@ -1,5 +1,13 @@
 # Changelog
 
+Note: `docs/` was reduced to `FYP_Technical_Report.pdf` on 2026-09-14; the markdown documents referenced by older entries below (METHODOLOGY, RESULTS, FIX_PLAN, AUDIT_SUMMARY, …) are in git history (commit d4a16d9), their content is in the PDF.
+
+## [Final audit] — 2026-09-21 — verification pass, no methodology change
+
+- **Verified from scratch** (nothing re-trained): preprocessing reproduces the frozen features, splits and scalers bit-for-bit; the single test-set evaluation reproduces `final_test_results.csv`, `cv_results.csv` and every prediction CSV to floating-point noise (≤ 1e-15); the live inference path (`predict_for_date`) reproduces the evaluation's per-day predictions to 1e-10; a truncation test on the real data (rebuild all features from history cut at three test-period dates) leaves every feature unchanged — no look-ahead; the 41 tests pass; live sync, `predict_next_day`, the API and all five dashboard tabs run.
+- **Honesty addition:** `UpCalls_pct` / `UpDays_pct` in the metric set (`src/utils/metrics.py`), in `final_test_results.csv` / `model_status.json` / `FINAL_RESULTS.md`, and on the dashboard (reliability table, test-set summary, performance table, honest reading). The combined forecast says UP on 97 % of Gold and 91 % of Silver test days, so its directional hit-rate is the share of up days by construction — now stated next to the number instead of left for the reader to infer.
+- **Dead code removed:** unused `unscale_target` / `scale_target`, the `fetch_*` aliases, `predict_all_models`, the `compute_*` metric aliases; `reportlab` dropped from `requirements.txt` (its generator was deleted on 2026-09-14). README gains a results-at-a-glance table and `make predict`; two notebook cells re-pointed from deleted docs to the PDF.
+
 ## [Pre-expo audit] — 2026-09-14 — combined forecast, complete-bar rule, dashboard without model selection
 
 - **Served forecast = equal-weight combination of all six trained models** (`src/inference/prediction.py::COMBINED`); no model selection in the UI or the API. Evaluated like every single model — averaged out-of-fold predictions on the walk-forward folds and once on the test set (`results/final_test_results.csv` / `cv_results.csv`, row *Combined*; `model_status.json: combined_test`). Result: within ±0.3 % of the random walk (DM p = 0.49 / 0.97 / 0.46), direction 46.9 / 50.3 / 53.8 % — no skill, honestly reported. The CV-selected single model is kept as `primary_model` for comparison.

@@ -293,8 +293,12 @@ with tab_fc:
                         'RMSE': [usd(comb_test['RMSE_usd']), usd(naive_test['RMSE_usd'])],
                         'MAPE': [pct(comb_test['MAPE_usd'], 2), pct(naive_test['MAPE_usd'], 2)],
                         'Direction correct': [f"{pct(comb_test['DirAcc_pct'])} (p = {comb_test['DirAcc_pvalue']:.2f} vs 50%)", '— (no direction)'],
+                        'Says UP on': [f"{pct(comb_test.get('UpCalls_pct'), 0)} of days ({pct(comb_test.get('UpDays_pct'), 0)} were up)", '—'],
                         'Beats random walk?': [f"{'Yes' if beats else 'No'} (Diebold–Mariano p = {comb_test['DM_pvalue']:.2f})", '—']})
                     st.dataframe(rel_tbl, width='stretch', hide_index=True)
+                    if pd.notna(comb_test.get('UpCalls_pct')) and comb_test['UpCalls_pct'] >= 80:
+                        st.caption(f"The UP/DOWN call is mostly the asset's average drift: the forecast said UP on {comb_test['UpCalls_pct']:.0f}% "
+                                   "of the unseen days, so its direction hit-rate is close to the share of up days by construction, not a timing signal.")
             except Exception as e:
                 st.error(f"Prediction failed: {e}")
                 logger.exception("Dashboard prediction error")
@@ -418,12 +422,14 @@ with tab_hist:
         m = COMBINED
         e_m, e_n = hist[f'error_pct_{m}'].abs(), hist['error_pct_Naive'].abs()
         hits = int(hist[f'direction_hit_{m}'].sum())
+        up_calls, up_days = (hist[f'pred_return_{m}'] > 0).mean() * 100, (hist['actual_return'] > 0).mean() * 100
         st.caption(f"{len(hist)} unseen days, {hist['target_date'].min().date()} → {hist['target_date'].max().date()}. Summary of the table below:")
         st.dataframe(pd.DataFrame({'': ['Combined forecast', 'Random walk'],
                                    'Mean abs. error (% of price)': [f"{e_m.mean():.2f}%", f"{e_n.mean():.2f}%"],
                                    'Median abs. error (% of price)': [f"{e_m.median():.2f}%", f"{e_n.median():.2f}%"],
                                    'Largest miss': [f"{e_m.max():.2f}%", f"{e_n.max():.2f}%"],
-                                   'Direction correct': [f"{hits / len(hist) * 100:.1f}% ({hits} of {len(hist)} days; chance ≈ 50%)", '— (no direction)']}),
+                                   'Direction correct': [f"{hits / len(hist) * 100:.1f}% ({hits} of {len(hist)} days; chance ≈ 50%)", '— (no direction)'],
+                                   'Says UP on': [f"{up_calls:.0f}% of days ({up_days:.0f}% were up)", '—']}),
                      width='stretch', hide_index=True)
         h = pd.DataFrame({'Predicted on': hist['date'].dt.date, 'For': hist['target_date'].dt.date,
                           'Predicted ($)': hist[f'pred_close_{m}'].round(2), 'Actual ($)': hist['actual_close'].round(2),
@@ -459,6 +465,7 @@ with tab_perf:
             'MAE ($)': t['MAE_usd'].map(usd), 'RMSE ($)': t['RMSE_usd'].map(usd), 'MAPE': t['MAPE_usd'].map(lambda v: pct(v, 2)),
             'RMSE (return)': t['RMSE_ret'].map(lambda v: f"{v:.5f}"), 'R² (return)': t['R2_ret'].map(lambda v: f"{v:+.3f}"),
             'Direction correct': np.where(is_naive, '—', t['DirAcc_pct'].map(lambda v: pct(v)) + ' (p ' + t['DirAcc_pvalue'].map(lambda v: f"{v:.2f}") + ')'),
+            'Says UP on': np.where(is_naive, '—', t['UpCalls_pct'].map(lambda v: pct(v, 0))) if 'UpCalls_pct' in t.columns else '—',
             'DM p vs random walk': np.where(is_naive, '—', t['DM_pvalue'].map(lambda v: f"{v:.2f}")),
             'Long/flat strategy': t['strategy_return_pct'].map(lambda v: f"{v:+.1f}%"),
             'Buy & hold': t['buy_hold_return_pct'].map(lambda v: f"{v:+.1f}%")})
@@ -474,9 +481,11 @@ with tab_perf:
             verdict = (f"it is {abs(rel):.2f}% {'below' if rel < 0 else 'above'} the random walk's error — "
                        f"not a significant difference (Diebold–Mariano p = {best['DM_pvalue']:.2f})")
         da_sig = 'significant' if best['DirAcc_pvalue'] < 0.05 else 'not significant'
+        up_txt = (f" The forecast said UP on {best['UpCalls_pct']:.0f}% of the days ({best['UpDays_pct']:.0f}% were up days), so the direction "
+                  f"call mostly reflects the asset's average drift rather than day-to-day timing." if 'UpCalls_pct' in best and pd.notna(best['UpCalls_pct']) else '')
         st.info(f"**Honest reading.** On the unseen test set the combined forecast's RMSE (return) is {best['RMSE_ret']:.5f} vs {naive_r['RMSE_ret']:.5f} "
                 f"for the random walk — {verdict}. Direction correct on {best['DirAcc_pct']:.1f}% of {int(best['DirAcc_n'])} days "
-                f"(binomial p = {best['DirAcc_pvalue']:.2f}, {da_sig}). MAPE is not accuracy: \"tomorrow = today\" scores the same MAPE. "
+                f"(binomial p = {best['DirAcc_pvalue']:.2f}, {da_sig}).{up_txt} MAPE is not accuracy: \"tomorrow = today\" scores the same MAPE. "
                 "R² on price levels is intentionally not shown — a random walk scores ≈ 0.95 there.")
 
         # comparison chart: every model vs the random walk

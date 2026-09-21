@@ -9,6 +9,8 @@ Two spaces are reported:
 
 "Directional accuracy" = share of days with a non-zero actual move on which
 sign(r̂) == sign(r). Days with exactly zero return are excluded (their direction is undefined).
+It is reported next to the share of UP calls: a forecast that says UP on ~all days scores the
+share of up days by construction, so its hit-rate reflects the asset's drift, not a signal.
 """
 import numpy as np
 from scipy import stats
@@ -109,15 +111,12 @@ def evaluate_forecast(true_ret, pred_ret, prev_close, naive_pred_ret=None, perio
         'RMSE_ret': rmse(true_ret, pred_ret), 'MAE_ret': mae(true_ret, pred_ret), 'R2_ret': r2(true_ret, pred_ret),
         'RMSE_usd': rmse(true_usd, pred_usd), 'MAE_usd': mae(true_usd, pred_usd), 'MAPE_usd': mape(true_usd, pred_usd),
         'DirAcc_pct': da, 'DirAcc_n': n_da, 'DirAcc_pvalue': p_da,
+        'UpCalls_pct': float(np.mean(pred_ret > 0) * 100), 'UpDays_pct': float(np.mean(true_ret > 0) * 100),
         'DM_stat_vs_naive': dm, 'DM_pvalue': p_dm,
         'pred_std': float(np.std(pred_ret)), 'true_std': float(np.std(true_ret)),
     }
     out.update(strategy_backtest(true_ret, pred_ret, periods_per_year=periods_per_year))
     return out
-
-
-# Backwards-compatible names used by older tests
-compute_rmse, compute_mae, compute_mape, compute_r2 = rmse, mae, mape, r2
 
 
 def qlike(true_var, pred_var):

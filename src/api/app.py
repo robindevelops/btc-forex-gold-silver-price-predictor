@@ -25,7 +25,7 @@ from src.inference.prediction import predict_next_day, available_models, combine
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Multi-Asset Next-Day Return Prediction API", version="2.1.0")
+app = FastAPI(title="AI-Powered Commodity Price Predictor API — Gold, Silver & Bitcoin", version="2.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 

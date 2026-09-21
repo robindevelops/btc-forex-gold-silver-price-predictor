@@ -226,12 +226,15 @@ def write_markdown(cv_df, test_df, status):
              f"Split: train ≤ {TRAIN_END}, validation ≤ {VAL_END}, test = remainder (touched once).", "",
              "**Bold** = the served forecast (Combined: equal-weight mean of the trained base models, no fitted weights). "
              "*Italic* = the best single model by walk-forward validation (test set never used for selection). "
-             "DA = directional accuracy on non-flat days (p = one-sided binomial test vs 50%). "
+             "DA = directional accuracy on non-flat days (p = one-sided binomial test vs 50%); UP calls = share of days the model "
+             "predicted a rise (compare with the share of actual up days in the section heading — a model that almost always says UP "
+             "scores the asset's drift, not a signal). "
              "DM p = Diebold–Mariano test vs the zero-return random-walk forecast (squared error, return space).", ""]
     for asset in ASSETS:
         s = status[asset]
         lines += [f"## {asset}", "",
-                  f"Test period {s['test_period'][0]} → {s['test_period'][1]} ({s['test']['n_test']} days). "
+                  f"Test period {s['test_period'][0]} → {s['test_period'][1]} ({s['test']['n_test']} days, "
+                  f"{s['combined_test'].get('UpDays_pct', float('nan')):.0f}% of them up days). "
                   f"Served forecast: **Combined** of {', '.join(s['combined_members'])}. "
                   f"Best single model by CV: *{s['primary_model']}* (CV RMSE {s['cv_rmse_ret']:.5f} vs naive {s['cv_rmse_ret_naive']:.5f}).", "",
                   "### Walk-forward validation (train+val, 4 expanding folds)", "",
@@ -241,14 +244,15 @@ def write_markdown(cv_df, test_df, status):
             lines.append(f"| {b}{r['model']}{b} | {r['RMSE_ret_mean']:.5f} ± {r['RMSE_ret_std']:.5f} | {r['MAE_ret_mean']:.5f} | "
                          f"{r['R2_ret_mean']:+.3f} | {r['DirAcc_pct_mean']:.1f} | {r['RMSE_usd_mean']:,.2f} |")
         lines += ["", "### Untouched test set", "",
-                  "| Model | MAE ($) | RMSE ($) | MAPE % | RMSE (ret) | R² (ret) | Dir. Acc % (n, p) | DM p vs naive | Strategy % | Buy&Hold % |",
-                  "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+                  "| Model | MAE ($) | RMSE ($) | MAPE % | RMSE (ret) | R² (ret) | Dir. Acc % (n, p) | UP calls % | DM p vs naive | Strategy % | Buy&Hold % |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
         for _, r in test_df[test_df['asset'] == asset].sort_values('RMSE_ret').iterrows():
             b = '**' if r['model'] == COMBINED else ('*' if r['model'] == s['primary_model'] else '')
             da = '—' if r['model'] == 'Naive' else f"{r['DirAcc_pct']:.1f} ({int(r['DirAcc_n'])}, {r['DirAcc_pvalue']:.2f})"
             dm = '—' if r['model'] == 'Naive' else f"{r['DM_pvalue']:.2f}"
+            up = '—' if r['model'] == 'Naive' else f"{r['UpCalls_pct']:.0f}"
             lines.append(f"| {b}{r['model']}{b} | {r['MAE_usd']:,.2f} | {r['RMSE_usd']:,.2f} | {r['MAPE_usd']:.2f} | {r['RMSE_ret']:.5f} | "
-                         f"{r['R2_ret']:+.3f} | {da} | {dm} | {r['strategy_return_pct']:+.1f} | {r['buy_hold_return_pct']:+.1f} |")
+                         f"{r['R2_ret']:+.3f} | {da} | {up} | {dm} | {r['strategy_return_pct']:+.1f} | {r['buy_hold_return_pct']:+.1f} |")
         lines.append("")
     with open(os.path.join(RESULTS_DIR, 'FINAL_RESULTS.md'), 'w') as f:
         f.write("\n".join(lines))

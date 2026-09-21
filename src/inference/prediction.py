@@ -211,19 +211,6 @@ def predict_for_date(asset, as_of, model_name=COMBINED):
     return result
 
 
-def predict_all_models(asset, as_of=None):
-    """One row per single model (and the stacked experiment) on the same input — comparison table."""
-    rows = []
-    for m in available_models(asset):
-        try:
-            r = predict_for_date(asset, as_of, m) if as_of else predict_next_day(asset, m)
-            rows.append({'model': m, 'predicted_price': r['predicted_price'], 'predicted_return_pct': r['predicted_return_pct'],
-                         'direction': r['direction'], 'actual_price': r.get('actual_price'), 'error_pct': r.get('error_pct')})
-        except Exception as e:                      # one broken artefact must not kill the table
-            logger.error(f"{asset}/{m}: {e}")
-    return rows
-
-
 def prediction_history(asset):
     """The out-of-sample prediction log written by the evaluation script (one row per unseen test day)."""
     path = os.path.join(RESULTS_DIR, 'predictions', f'{get_prefix(asset)}_test_predictions.csv')

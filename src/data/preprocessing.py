@@ -397,17 +397,6 @@ def build_dataset(asset_name, seq_len=SEQ_LEN, task=DEFAULT_TASK, train_start=No
     return out
 
 
-def unscale_target(y_scaled, scaler, target_idx):
-    """Map a scaled log-return back to a real log-return (inverse of MinMaxScaler on one column)."""
-    lo, hi = scaler.data_min_[target_idx], scaler.data_max_[target_idx]
-    return np.ravel(y_scaled) * (hi - lo) + lo
-
-
-def scale_target(y_real, scaler, target_idx):
-    lo, hi = scaler.data_min_[target_idx], scaler.data_max_[target_idx]
-    return (np.ravel(y_real) - lo) / (hi - lo)
-
-
 def run_cleaning_pipeline():
     print("Starting Data Cleaning Pipeline...\n" + "=" * 30)
     for asset in ASSET_CONFIG:
