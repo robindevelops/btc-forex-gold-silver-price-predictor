@@ -2,6 +2,12 @@
 
 Note: `docs/` was reduced to `FYP_Technical_Report.pdf` on 2026-09-14; the markdown documents referenced by older entries below (METHODOLOGY, RESULTS, FIX_PLAN, AUDIT_SUMMARY, …) are in git history (commit d4a16d9), their content is in the PDF.
 
+## [Conditional uncertainty band] — 2026-09-21 — the one approved "improvement" after the accuracy-improvement analysis
+
+- **Analysis first** (validation folds only): new tree families (ExtraTrees, HistGB), Ridge shrinkage beyond the grid, dropping redundant features and validation-weighted ensembling all land within ±0.2 % of the random walk — identical to the current members — and the test set cannot detect anything below a ~5–10 % RMSE gain. Conclusion: no change aimed at point accuracy is justified; point forecasts, members, weights and features are unchanged.
+- **What was mis-calibrated:** the ±band shown with every forecast was a constant (test RMSE). On validation it covered 87 % of Bitcoin days (too wide) but only 53 % of Gold and 44 % of Silver days (too narrow) for a nominal 68 %.
+- **Change:** the band is now `P_t·exp(r̂ ± σ_t)` with σ_t = the `ewma_vol` feature at day t (`src/inference/prediction.py: BAND_SIGMA_FEATURE`, `_band()`), so it uses only information known at the forecast and widens/narrows with the market. `backtesting.py` scores it against a fixed-width band on the validation out-of-fold Combined predictions and once on the test set (`results/band_calibration.csv`, `model_status.json: band`, section in `FINAL_RESULTS.md`, `band_lo/hi/in_band_Combined` columns in the prediction CSVs). API: `band_sigma_pct`, `band_rule`, `band_calibration`. Dashboard: band caption with its test coverage, band on the forecast chart and the test-period chart, in/out-of-band on *Predict a Day* and *Test-Set History*, calibration table on *Model Performance*, Methodology paragraph. Tests: 43.
+
 ## [Final audit] — 2026-09-21 — verification pass, no methodology change
 
 - **Verified from scratch** (nothing re-trained): preprocessing reproduces the frozen features, splits and scalers bit-for-bit; the single test-set evaluation reproduces `final_test_results.csv`, `cv_results.csv` and every prediction CSV to floating-point noise (≤ 1e-15); the live inference path (`predict_for_date`) reproduces the evaluation's per-day predictions to 1e-10; a truncation test on the real data (rebuild all features from history cut at three test-period dates) leaves every feature unchanged — no look-ahead; the 41 tests pass; live sync, `predict_next_day`, the API and all five dashboard tabs run.

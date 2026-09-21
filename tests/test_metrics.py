@@ -42,3 +42,13 @@ def test_evaluate_forecast_keys():
     out = evaluate_forecast(true, np.zeros(50) + 0.001, np.full(50, 100.0))
     for k in ('RMSE_ret', 'MAE_ret', 'R2_ret', 'RMSE_usd', 'MAE_usd', 'MAPE_usd', 'DirAcc_pct', 'DM_pvalue', 'strategy_return_pct'):
         assert k in out
+
+
+def test_band_calibration_coverage_and_qlike():
+    from src.utils.metrics import band_calibration
+    rng = np.random.default_rng(0)
+    sigma = np.full(20000, 0.02)
+    e = rng.normal(0, 0.02, 20000)
+    c = band_calibration(e, np.zeros_like(e), sigma)
+    assert abs(c['coverage_pct'] - 68.27) < 1.0 and c['n'] == 20000 and np.isclose(c['mean_sigma_pct'], 2.0)
+    assert c['qlike'] < band_calibration(e, np.zeros_like(e), sigma * 3)['qlike']      # a badly-scaled band scores worse

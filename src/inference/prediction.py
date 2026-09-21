@@ -16,8 +16,11 @@ the test set; the combination is evaluated on the same unseen days as every sing
 (results/final_test_results.csv, row 'Combined'). The stacked ensemble is not a member because it is itself
 a blend of some of these models. The user never has to choose a model.
 
-Every result carries the held-out test metrics of the forecast used and an uncertainty band (± RMSE of its
-test-set return error), so the UI never shows a number without context.
+Every result carries the held-out test metrics of the forecast used and a CONDITIONAL uncertainty band
+    P_t · exp(r̂ ± σ_t),   σ_t = RiskMetrics EWMA volatility of the returns up to day t (the `ewma_vol` feature),
+so the band widens in volatile regimes and narrows in calm ones. A fixed-width band was mis-calibrated (validation
+coverage 44–87 % for a nominal 68 %); σ_t uses only information known at day t (src/evaluation/backtesting.py
+reports its coverage on validation and test — results/band_calibration.csv). The UI never shows a number without context.
 """
 import os
 import sys
@@ -43,6 +46,8 @@ DISCLAIMER = ("Research prototype for an academic project. Next-day financial re
 
 COMBINED = 'Combined'
 BASE_MODELS = list(TABULAR) + list(RECURRENT)          # the members of the combined forecast, if trained
+BAND_SIGMA_FEATURE = 'ewma_vol'                        # σ_t of the ±1σ band: EWMA (λ = 0.94) volatility at day t
+BAND_RULE = f'P_t · exp(r̂ ± σ_t), σ_t = {BAND_SIGMA_FEATURE} at day t (RiskMetrics EWMA, λ = 0.94)'
 
 
 # ─────────────────────────────────────────────── data
@@ -85,6 +90,15 @@ def _window(asset, feats, as_of=None, seq_len=SEQ_LEN):
     scaled = scaler.transform(hist[cols].values)
     window = scaled[-seq_len:]
     return window[np.newaxis, :, :], window[-1:, :], float(hist['price'].iloc[-1]), hist.index[-1], cols
+
+
+def _band(feats, as_of_ts, last_close, r_hat):
+    """±1σ price band for day t+1 from the volatility known at day t (unscaled feature value on row `as_of_ts`)."""
+    sigma = float(feats.loc[as_of_ts, BAND_SIGMA_FEATURE])
+    if not np.isfinite(sigma) or sigma <= 0:
+        raise ValueError(f"invalid {BAND_SIGMA_FEATURE} on {as_of_ts.date()}: {sigma}")
+    return {'uncertainty_band': [float(last_close * np.exp(r_hat - sigma)), float(last_close * np.exp(r_hat + sigma))],
+            'band_sigma_pct': sigma * 100, 'band_rule': BAND_RULE}
 
 
 def _target_stats(asset):
@@ -163,13 +177,12 @@ def predict_next_day(asset, model_name=COMBINED):
     r_hat, members = _predict_from_window(asset, model_name, Xseq, Xt)
     pred_price = last_close * np.exp(r_hat)
     ctx = _context(asset, model_name, status)
-    band = (ctx['test_metrics'] or {}).get('RMSE_ret')
     result = {
         'asset': asset, 'as_of_date': str(as_of.date()), 'current_price': last_close,
         'target_date': str(next_trading_day(ASSET_CONFIG[asset]['type'], as_of)),
         'predicted_price': float(pred_price), 'predicted_return_pct': r_hat * 100,
         'direction': 'UP' if r_hat > 0 else 'DOWN', 'n_features': len(cols),
-        'uncertainty_band': [float(last_close * np.exp(r_hat - band)), float(last_close * np.exp(r_hat + band))] if band else None,
+        **_band(feats, as_of, last_close, r_hat), 'band_calibration': status.get('band'),
         'data_source': 'live download' if _features_path(asset).endswith('_live_features.csv') else 'stored dataset',
         'individual': _individual(members, last_close), **ctx,
     }
@@ -195,16 +208,19 @@ def predict_for_date(asset, as_of, model_name=COMBINED):
         'predicted_price': float(pred_price), 'predicted_return_pct': r_hat * 100,
         'direction': 'UP' if r_hat > 0 else 'DOWN',
         'in_unseen_test_period': bool(as_of_ts >= pd.Timestamp(VAL_END)),
+        **_band(feats, as_of_ts, last_close, r_hat), 'band_calibration': status.get('band'),
         'actual_date': None, 'actual_price': None, 'actual_return_pct': None, 'error_usd': None, 'error_pct': None, 'direction_hit': None,
-        'individual': _individual(members, last_close), **_context(asset, model_name, status),
+        'in_band': None, 'individual': _individual(members, last_close), **_context(asset, model_name, status),
     }
     if pos + 1 < len(feats):
         actual = float(feats['price'].iloc[pos + 1])
         actual_ret = float(np.log(actual / last_close))
+        lo, hi = result['uncertainty_band']
         result.update({'actual_date': str(feats.index[pos + 1].date()), 'actual_price': actual,
                        'actual_return_pct': actual_ret * 100, 'error_usd': float(pred_price - actual),
                        'error_pct': float((pred_price - actual) / actual * 100),
-                       'direction_hit': bool(np.sign(r_hat) == np.sign(actual_ret)) if actual_ret != 0 else None})
+                       'direction_hit': bool(np.sign(r_hat) == np.sign(actual_ret)) if actual_ret != 0 else None,
+                       'in_band': bool(lo <= actual <= hi)})
         for row in result['individual'] or []:
             row['error_pct'] = (row['predicted_price'] - actual) / actual * 100
             row['direction_hit'] = (row['direction'] == ('UP' if actual_ret > 0 else 'DOWN')) if actual_ret != 0 else None
@@ -233,4 +249,5 @@ if __name__ == '__main__':
         if r:
             members = ', '.join(f"{m['model']} {m['predicted_return_pct']:+.2f}%" for m in r['individual'])
             print(f"{a:8s} {r['as_of_date']}  ${r['current_price']:,.2f} → ${r['predicted_price']:,.2f} "
-                  f"({r['predicted_return_pct']:+.2f}% {r['direction']})  combined of [{members}]")
+                  f"({r['predicted_return_pct']:+.2f}% {r['direction']})  ±1σ band ${r['uncertainty_band'][0]:,.2f}–${r['uncertainty_band'][1]:,.2f} "
+                  f"(σ_t = {r['band_sigma_pct']:.2f}%)  combined of [{members}]")

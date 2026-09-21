@@ -250,8 +250,13 @@ with tab_fc:
                     f"({r['predicted_price'] - r['current_price']:+,.2f} USD)</span></div>", unsafe_allow_html=True)
                 band = r.get('uncertainty_band')
                 if band:
-                    st.caption(f"±1 RMSE band from the unseen test period: **{usd_md(band[0])} – {usd_md(band[1])}**. The band is far wider than "
-                               f"the predicted move — that is the honest picture of next-day uncertainty.")
+                    cal = r.get('band_calibration') or {}
+                    cov = cal.get('test_conditional_coverage_pct'); cov_fixed = cal.get('test_fixed_coverage_pct')
+                    cal_txt = (f" On the unseen test period this band contained the actual close on **{cov:.0f}%** of days "
+                               f"(nominal 68% for ±1σ; a fixed-width band: {cov_fixed:.0f}%)." if cov is not None and cov_fixed is not None else "")
+                    st.caption(f"**±1σ band: {usd_md(band[0])} – {usd_md(band[1])}** — σ = {r['band_sigma_pct']:.2f}%, the EWMA volatility of "
+                               f"{asset}'s returns up to {r['as_of_date']}, so the band widens in volatile periods and narrows in calm ones. "
+                               f"It is far wider than the predicted move — that is the honest picture of next-day uncertainty.{cal_txt}")
 
                 # each model's own prediction and the combination
                 t = pd.DataFrame(r['individual'])
@@ -274,7 +279,7 @@ with tab_fc:
                 fh.add_trace(go.Scatter(x=tail['timestamp'], y=tail['price'], mode='lines', name='close',
                                         line=dict(color=COLOR[asset], width=2)))
                 if band:
-                    fh.add_trace(go.Scatter(x=[next_date, next_date], y=band, mode='lines', name='±1 RMSE band',
+                    fh.add_trace(go.Scatter(x=[next_date, next_date], y=band, mode='lines', name='±1σ band (EWMA vol)',
                                             line=dict(color=BAND, width=8)))
                 fh.add_trace(go.Scatter(x=[tail['timestamp'].iloc[-1], next_date], y=[r['current_price'], r['predicted_price']],
                                         mode='lines+markers', name='combined forecast',
@@ -376,6 +381,9 @@ with tab_demo:
                     m4.metric("Prediction error", f"{r['error_pct']:+.2f}%", f"{r['error_usd']:+,.2f} USD", delta_color="off")
                     hit = r['direction_hit']
                     m5.metric("Direction", f"{r['direction']} → {'HIT ✔' if hit else ('FAIL ✘' if hit is not None else 'flat')}")
+                    b = r['uncertainty_band']
+                    st.caption(f"±1σ band for that day: **{usd_md(b[0])} – {usd_md(b[1])}** (σ = {r['band_sigma_pct']:.2f}% from the volatility known on "
+                               f"{r['as_of_date']}) — the actual close fell **{'inside' if r['in_band'] else 'outside'}** it.")
                 else:
                     m3.metric("Actual close", "not yet known")
                 st.caption(f"Forecast: **combined** of {len(r['individual'])} models · horizon {r['horizon_days']} trading day · "
@@ -389,6 +397,10 @@ with tab_demo:
                                             line=dict(color=COLOR[asset], width=2)))
                     fd.add_trace(go.Scatter(x=hist['target_date'], y=hist[col_pred], mode='lines', name='combined predicted close',
                                             line=dict(color=ACCENT, width=1.4, dash='dash')))
+                    if f'band_lo_{COMBINED}' in hist.columns:
+                        fd.add_trace(go.Scatter(x=pd.concat([hist['target_date'], hist['target_date'][::-1]]),
+                                                y=pd.concat([hist[f'band_hi_{COMBINED}'], hist[f'band_lo_{COMBINED}'][::-1]]),
+                                                fill='toself', fillcolor='rgba(0,224,198,0.12)', line=dict(width=0), name='±1σ band (EWMA vol)', hoverinfo='skip'))
                     if r['actual_price'] is not None:
                         fd.add_trace(go.Scatter(x=[pd.Timestamp(r['actual_date'])], y=[r['predicted_price']], mode='markers', name='this prediction',
                                                 marker=dict(color=ACCENT, size=13, symbol='diamond', line=dict(color='white', width=1))))
@@ -424,8 +436,10 @@ with tab_hist:
         hits = int(hist[f'direction_hit_{m}'].sum())
         up_calls, up_days = (hist[f'pred_return_{m}'] > 0).mean() * 100, (hist['actual_return'] > 0).mean() * 100
         st.caption(f"{len(hist)} unseen days, {hist['target_date'].min().date()} → {hist['target_date'].max().date()}. Summary of the table below:")
+        in_band = hist[f'in_band_{COMBINED}'] if f'in_band_{COMBINED}' in hist.columns else None
         st.dataframe(pd.DataFrame({'': ['Combined forecast', 'Random walk'],
                                    'Mean abs. error (% of price)': [f"{e_m.mean():.2f}%", f"{e_n.mean():.2f}%"],
+                                   **({'Actual inside ±1σ band': [f"{in_band.mean() * 100:.1f}% of days (nominal 68%)", '—']} if in_band is not None else {}),
                                    'Median abs. error (% of price)': [f"{e_m.median():.2f}%", f"{e_n.median():.2f}%"],
                                    'Largest miss': [f"{e_m.max():.2f}%", f"{e_n.max():.2f}%"],
                                    'Direction correct': [f"{hits / len(hist) * 100:.1f}% ({hits} of {len(hist)} days; chance ≈ 50%)", '— (no direction)'],
@@ -436,7 +450,9 @@ with tab_hist:
                           'Error ($)': (hist[f'pred_close_{m}'] - hist['actual_close']).round(2),
                           'Error (%)': hist[f'error_pct_{m}'].round(2),
                           'Random walk error (%)': hist['error_pct_Naive'].round(2),
-                          'Direction': hist[f'direction_hit_{m}'].map({1: 'HIT', 0: 'FAIL'})})
+                          'Direction': hist[f'direction_hit_{m}'].map({1: 'HIT', 0: 'FAIL'}),
+                          **({'±1σ band': hist[f'band_lo_{m}'].map(usd) + ' – ' + hist[f'band_hi_{m}'].map(usd),
+                              'In band': hist[f'in_band_{m}'].map({1: 'yes', 0: 'no'})} if f'in_band_{m}' in hist.columns else {})})
         st.dataframe(h.sort_values('For', ascending=False), width='stretch', hide_index=True, height=440,
                      column_config={'Predicted ($)': st.column_config.NumberColumn(format="$%.2f"),
                                     'Actual ($)': st.column_config.NumberColumn(format="$%.2f"),
@@ -555,6 +571,19 @@ with tab_perf:
                 fb.update_layout(hovermode="closest")
                 st.plotly_chart(layout(fb, 420, f"{pick_m}: top 15 of {len(f_sel)} features (normalised importance)", legend=False), use_container_width=True)
 
+        bc = load_csv('band_calibration.csv')
+        if bc is not None and len(bc[bc['asset'] == asset]):
+            st.subheader("Uncertainty band — is the ±1σ band honest?")
+            b = bc[bc['asset'] == asset]
+            st.dataframe(pd.DataFrame({'Split': b['split'], 'Band': b['band'].map({'conditional': 'conditional (served): σ = EWMA vol at day t', 'fixed': 'fixed width (return std before the split)'}),
+                                       'Days': b['n'], 'Actual inside band': b['coverage_pct'].map(lambda v: f"{v:.1f}%"),
+                                       'QLIKE (lower = better)': b['qlike'].map(lambda v: f"{v:.3f}"), 'Mean σ': b['mean_sigma_pct'].map(lambda v: f"{v:.2f}%")}),
+                         width='stretch', hide_index=True)
+            st.caption("A ±1σ band should contain the actual close on ≈68% of days. The served band uses only the volatility known on the day of the "
+                       "forecast, so it widens in turbulent markets and narrows in calm ones; the fixed-width alternative is shown for comparison. "
+                       "This is the one part of the forecast where the data has demonstrable skill: the size of tomorrow's move is far more "
+                       "predictable than its direction.")
+
         reg = load_csv('regime_analysis.csv')
         if reg is not None:
             with st.expander("Performance by market regime (combined forecast vs random walk, unseen test period)"):
@@ -609,8 +638,13 @@ ensemble experiment, all scored on identical days. Models with a stopping rule (
 (no weights are fitted, so nothing is selected on the test set), and the combination is evaluated exactly like every single model — on the walk-forward
 folds and once on the unseen test set (row *Combined*). The best single model by validation ({cv_best}) is reported for comparison.
 
+**Uncertainty band.** Every forecast is shown with `P_t · exp(ŷ_t ± σ_t)`, where `σ_t` is the RiskMetrics EWMA volatility (λ = 0.94) of the returns up to day *t* —
+one of the model's own inputs, so it uses no future information. A fixed-width band was mis-calibrated on validation (44–87 % coverage for a nominal 68 %);
+the conditional band's coverage and QLIKE are reported on validation and test (Model Performance tab, `results/band_calibration.csv`).
+
 **Metrics.** MAE / RMSE / MAPE in USD (what a user sees); RMSE and R² of the return (what is actually predicted); directional accuracy on non-flat days with a
-binomial p-value against 50 %; Diebold–Mariano test of squared errors against the random walk; a long/flat strategy backtest with 10 bps cost.
+binomial p-value against 50 %; Diebold–Mariano test of squared errors against the random walk; a long/flat strategy backtest with 10 bps cost;
+coverage and QLIKE of the ±1σ band.
 """)
     st.markdown("**Served forecast — details**")
     fit = status.get('fit_info') or {}

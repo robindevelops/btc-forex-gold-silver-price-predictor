@@ -11,7 +11,10 @@ For every asset it
   3. writes `data/models/model_status.json` — `primary_model` is the single ML model with the best mean
      walk-forward RMSE (return space); `combined_test` holds the test metrics of the served COMBINED forecast
      (equal-weight mean of every trained base model — no fitted weights, so nothing is selected on the test set).
-  4. renders `results/FINAL_RESULTS.md` for the report.
+  4. scores the ±1σ uncertainty band served with every forecast (σ_t = EWMA volatility at day t) against a fixed-width
+     band, on the validation folds (out-of-fold Combined predictions) and once on the test set
+     (`results/band_calibration.csv`, `model_status.json: band`);
+  5. renders `results/FINAL_RESULTS.md` for the report.
 
 The Combined forecast is scored twice, exactly like the single models: on the walk-forward folds (the base
 models' out-of-fold predictions are averaged per fold) and once on the untouched test set.
@@ -35,7 +38,8 @@ from src.data.preprocessing import build_dataset
 from src.models.registry import make_model, load_trained, artefact_exists, TABULAR, RECURRENT
 from src.models.ensemble_model import StackedModel, stack_path
 from src.evaluation.cross_validation import cv_evaluate, summarise_folds
-from src.utils.metrics import evaluate_task
+from src.utils.metrics import evaluate_task, band_calibration
+from src.inference.prediction import BAND_SIGMA_FEATURE, BAND_RULE
 from src.utils.logging_config import get_logger, setup_logging
 
 setup_logging()
@@ -64,8 +68,8 @@ def cv_table(asset, data):
         for _, r in ts[ts['asset'] == asset].iterrows():
             rows.append({'asset': asset, 'model': r['model'], 'n_folds': CV_FOLDS,
                          **{k: r[k] for k in ts.columns if k.endswith('_mean') or k.endswith('_std')}})
-    rows += combined_cv_row(asset, data)
-    return rows
+    comb_rows, oof = combined_cv_row(asset, data)
+    return rows + comb_rows, oof
 
 
 def combined_cv_row(asset, data):
@@ -76,7 +80,7 @@ def combined_cv_row(asset, data):
     """
     members = [m for m in ML_MODELS if model_exists(m, asset)]
     if not members:
-        return []
+        return [], None
     oof, fold_sizes, idx = {}, None, None
     for m in members:
         member_folds, oof[m], idx = cv_evaluate(m, get_params(m, asset, data['task']), data, n_splits=CV_FOLDS, return_oof=True)
@@ -92,7 +96,42 @@ def combined_cv_row(asset, data):
         start += n_val
     log.info(f"{asset}: Combined walk-forward RMSE_ret={np.mean([f['RMSE_ret'] for f in folds]):.5f} over {len(folds)} folds "
              f"(members: {', '.join(members)})")
-    return [{'asset': asset, 'model': COMBINED, 'n_folds': len(folds), **summarise_folds(folds)}]
+    return [{'asset': asset, 'model': COMBINED, 'n_folds': len(folds), **summarise_folds(folds)}], (data['inv'](mean_pred), idx)
+
+
+def band_rows(asset, data, pred_df, oof):
+    """
+    Calibration of the served ±1σ band, P_t·exp(r̂ ± σ_t):
+        conditional  σ_t = `ewma_vol` at day t (what the dashboard and API serve)
+        fixed        σ   = std of the returns observed before the scored period (the natural constant-width alternative)
+    Scored on the validation part of the walk-forward out-of-fold Combined predictions and once on the test set.
+    Nominal coverage of a ±1σ band is 68.3 %.
+    """
+    f = data['features']
+    rows = []
+    if oof is not None:
+        pred, idx = oof
+        n_tr = len(data['y_train'])
+        m = idx >= n_tr                                              # out-of-fold predictions that fall in the validation split
+        dates = np.concatenate([data['dates_train'], data['dates_val']])[idx[m]]
+        y = np.concatenate([data['y_real_train'], data['y_real_val']])[idx[m]]
+        sig_c = f[BAND_SIGMA_FEATURE].reindex(dates).values
+        sig_f = float(np.std(data['y_real_train']))
+        for name, s in (('conditional', sig_c), ('fixed', np.full(len(y), sig_f))):
+            rows.append({'asset': asset, 'split': 'validation', 'band': name, **band_calibration(y, pred[m], s)})
+    y, r = pred_df['actual_return'].values, pred_df[f'pred_return_{COMBINED}'].values
+    sig_c = f[BAND_SIGMA_FEATURE].reindex(pred_df['date']).values
+    sig_f = float(np.std(np.concatenate([data['y_real_train'], data['y_real_val']])))
+    for name, s in (('conditional', sig_c), ('fixed', np.full(len(y), sig_f))):
+        rows.append({'asset': asset, 'split': 'test', 'band': name, **band_calibration(y, r, s)})
+    pred_df['sigma_t'] = sig_c
+    pred_df[f'band_lo_{COMBINED}'] = pred_df['prev_close'] * np.exp(r - sig_c)
+    pred_df[f'band_hi_{COMBINED}'] = pred_df['prev_close'] * np.exp(r + sig_c)
+    pred_df[f'in_band_{COMBINED}'] = ((pred_df['actual_close'] >= pred_df[f'band_lo_{COMBINED}']) &
+                                      (pred_df['actual_close'] <= pred_df[f'band_hi_{COMBINED}'])).astype(int)
+    for rr in rows:
+        log.info(f"  band {rr['split']:10s} {rr['band']:11s} coverage={rr['coverage_pct']:.1f}% (nominal 68.3) QLIKE={rr['qlike']:.3f} mean σ={rr['mean_sigma_pct']:.2f}%")
+    return rows
 
 
 # ------------------------------------------------------------------ test predictions
@@ -150,14 +189,15 @@ def regime_analysis(asset, data, pred_df, served):
 
 
 def main():
-    cv_rows, test_rows, status, regime_rows = [], [], {}, []
+    cv_rows, test_rows, status, regime_rows, band_tbl = [], [], {}, [], []
     for asset in ASSETS:
         log.info(f"===== {asset} =====")
         data = build_dataset(asset)
         true_ret = data['y_real_test']
         prev = data['prev_test']
 
-        cv_rows += cv_table(asset, data)
+        rows_cv, oof = cv_table(asset, data)
+        cv_rows += rows_cv
         preds, infos = test_predictions(asset, data)
 
         # prediction history: one row per unseen day — what the model saw (date), what it predicted for
@@ -176,6 +216,8 @@ def main():
             log.info(f"  {name:12s} RMSE_ret={met['RMSE_ret']:.5f} R2_ret={met['R2_ret']:+.3f} "
                      f"DA={met['DirAcc_pct']:.1f}% (p={met['DirAcc_pvalue']:.2f}) DM p={met['DM_pvalue']:.2f} "
                      f"RMSE$={met['RMSE_usd']:,.2f} strat={met['strategy_return_pct']:+.1f}% B&H={met['buy_hold_return_pct']:+.1f}%")
+        b_rows = band_rows(asset, data, pred_df, oof) if COMBINED in preds else []
+        band_tbl += b_rows
         pred_df.to_csv(os.path.join(PRED_DIR, f'{get_prefix(asset)}_test_predictions.csv'), index=False)
 
         # ---- model selection on VALIDATION (walk-forward) results only
@@ -207,21 +249,25 @@ def main():
             'test_period': [str(data['target_dates_test'][0].date()), str(data['target_dates_test'][-1].date())],
             'params': get_params(best['model'], asset), 'fit_info': infos.get(best['model'], {}),
             'features': data['columns'], 'target_mean': data['target_mean'], 'target_std': data['target_std'],
+            'band': {'rule': BAND_RULE, 'sigma_feature': BAND_SIGMA_FEATURE, 'nominal_coverage_pct': 68.27,
+                     **{f"{r['split']}_{r['band']}_coverage_pct": r['coverage_pct'] for r in b_rows},
+                     **{f"{r['split']}_{r['band']}_qlike": r['qlike'] for r in b_rows}},
         }
         log.info(f"  → best single model for {asset} by CV: {best['model']} (CV RMSE_ret {best['RMSE_ret_mean']:.5f} vs naive "
                  f"{naive_cv['RMSE_ret_mean']:.5f}); served forecast = {COMBINED} of {status[asset]['combined_members']}")
         regime_rows += regime_analysis(asset, data, pred_df, COMBINED if COMBINED in preds else best['model'])
 
     pd.DataFrame(regime_rows).to_csv(os.path.join(RESULTS_DIR, 'regime_analysis.csv'), index=False)
+    pd.DataFrame(band_tbl).to_csv(os.path.join(RESULTS_DIR, 'band_calibration.csv'), index=False)
     pd.DataFrame(cv_rows).to_csv(os.path.join(RESULTS_DIR, 'cv_results.csv'), index=False)
     pd.DataFrame(test_rows).to_csv(os.path.join(RESULTS_DIR, 'final_test_results.csv'), index=False)
     with open(MODEL_STATUS_PATH, 'w') as f:
         json.dump(status, f, indent=2, default=str)
-    write_markdown(pd.DataFrame(cv_rows), pd.DataFrame(test_rows), status)
-    log.info("Final evaluation complete → results/final_test_results.csv, results/cv_results.csv, results/FINAL_RESULTS.md")
+    write_markdown(pd.DataFrame(cv_rows), pd.DataFrame(test_rows), status, pd.DataFrame(band_tbl))
+    log.info("Final evaluation complete → results/final_test_results.csv, results/cv_results.csv, results/band_calibration.csv, results/FINAL_RESULTS.md")
 
 
-def write_markdown(cv_df, test_df, status):
+def write_markdown(cv_df, test_df, status, band_df=None):
     lines = ["# Final Results (auto-generated by src/evaluation/backtesting.py)", "",
              f"Split: train ≤ {TRAIN_END}, validation ≤ {VAL_END}, test = remainder (touched once).", "",
              "**Bold** = the served forecast (Combined: equal-weight mean of the trained base models, no fitted weights). "
@@ -253,6 +299,13 @@ def write_markdown(cv_df, test_df, status):
             up = '—' if r['model'] == 'Naive' else f"{r['UpCalls_pct']:.0f}"
             lines.append(f"| {b}{r['model']}{b} | {r['MAE_usd']:,.2f} | {r['RMSE_usd']:,.2f} | {r['MAPE_usd']:.2f} | {r['RMSE_ret']:.5f} | "
                          f"{r['R2_ret']:+.3f} | {da} | {up} | {dm} | {r['strategy_return_pct']:+.1f} | {r['buy_hold_return_pct']:+.1f} |")
+        if band_df is not None and len(band_df):
+            lines += ["", "### Uncertainty band served with the Combined forecast (±1σ, nominal coverage 68.3 %)", "",
+                      "| Split | Band | Days | Coverage % | QLIKE | Mean σ % |", "|---|---|---:|---:|---:|---:|"]
+            for _, r in band_df[band_df['asset'] == asset].iterrows():
+                b = '**' if r['band'] == 'conditional' else ''
+                lines.append(f"| {r['split']} | {b}{r['band']}{b} | {int(r['n'])} | {r['coverage_pct']:.1f} | {r['qlike']:.3f} | {r['mean_sigma_pct']:.2f} |")
+            lines.append(f"conditional = σ_t is the EWMA volatility at day t (served); fixed = one width, the return std of the data before the split.")
         lines.append("")
     with open(os.path.join(RESULTS_DIR, 'FINAL_RESULTS.md'), 'w') as f:
         f.write("\n".join(lines))

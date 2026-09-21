@@ -14,9 +14,9 @@
 | `training/` | `tune_models.py` | walk-forward grid search on train+val → `results/tuning/best_params.json` |
 | | `train_models.py` | phase A (train→val metrics, loss curves, importance) + phase B (deployed model on train+val) |
 | `evaluation/` | `cross_validation.py` | expanding-window folds, `cv_evaluate()` |
-| | `backtesting.py` | **the only reader of the test split**: final tables for every model and the Combined forecast, CV comparison, `model_status.json` |
+| | `backtesting.py` | **the only reader of the test split**: final tables for every model and the Combined forecast, CV comparison, ±1σ band calibration (`band_calibration.csv`), `model_status.json` |
 | | `plots.py` | report figures |
-| `inference/` | `prediction.py` | `predict_next_day()` (Combined = equal-weight mean of all trained models, with each member's prediction), `predict_for_date()` demo, held-out metrics and uncertainty band |
+| `inference/` | `prediction.py` | `predict_next_day()` (Combined = equal-weight mean of all trained models, with each member's prediction), `predict_for_date()` demo, held-out metrics and the conditional ±1σ band (σ_t = `ewma_vol` at day t) |
 | `api/` | `app.py` | FastAPI |
 | `utils/` | `metrics.py` | RMSE/MAE/MAPE/R², directional accuracy + binomial test, Diebold–Mariano, strategy backtest |
 | | `inverse_transform.py` | `P̂ = P_t · exp(r̂)` |

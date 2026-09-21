@@ -96,3 +96,24 @@ def test_live_sync_survives_network_failure(monkeypatch):
     import src.data.sync_live_data as sl
     monkeypatch.setattr(sl, 'fetch_all_external_data', lambda out_dir: (_ for _ in ()).throw(ConnectionError('offline')))
     assert sl.update_live_data('Bitcoin', refresh_external=True) is False   # returns False, never raises
+
+
+@pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'model_status.json')), reason="models not trained")
+def test_uncertainty_band_is_conditional_and_uses_only_day_t_volatility():
+    """The ±1σ band is P_t·exp(r̂ ± σ_t) with σ_t = the EWMA-volatility feature on the forecast day — no future rows."""
+    import src.inference.prediction as pr
+    f = pr.load_features('Silver', live=False)
+    days = f.loc['2026-03-01':].index[[3, 40]]                       # two unseen test days with different volatility
+    sig = []
+    for day in days:
+        r = pr.predict_for_date('Silver', str(day.date()))
+        s = f.loc[day, pr.BAND_SIGMA_FEATURE]
+        assert np.isclose(r['band_sigma_pct'], s * 100)
+        lo, hi = r['uncertainty_band']
+        rh = r['predicted_return_pct'] / 100
+        assert np.isclose(lo, r['current_price'] * np.exp(rh - s)) and np.isclose(hi, r['current_price'] * np.exp(rh + s))
+        assert r['in_band'] == (lo <= r['actual_price'] <= hi)
+        sig.append(s)
+    assert not np.isclose(sig[0], sig[1])                             # the band really is conditional (width changes day to day)
+    r_live = pr.predict_next_day('Silver')
+    assert r_live['uncertainty_band'][0] < r_live['predicted_price'] < r_live['uncertainty_band'][1] and r_live['band_rule']

@@ -2,7 +2,7 @@
 
 *Final Year Project (BSCS) — a leakage-audited, walk-forward-validated comparison of statistical, tree-based and recurrent models against the random-walk baseline, with a live prediction dashboard and API.*
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16-orange) ![LightGBM](https://img.shields.io/badge/LightGBM-4.6-green) ![Streamlit](https://img.shields.io/badge/Streamlit-1.50-red) ![Tests](https://img.shields.io/badge/tests-41%20passing-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16-orange) ![LightGBM](https://img.shields.io/badge/LightGBM-4.6-green) ![Streamlit](https://img.shields.io/badge/Streamlit-1.50-red) ![Tests](https://img.shields.io/badge/tests-43%20passing-brightgreen)
 
 ## What the project does
 
@@ -10,7 +10,7 @@
 2. Engineers **stationary, backward-looking features** (returns and 20-day momentum, rolling/HAR/EWMA volatility, RSI/ADX/ROC, normalised MACD, EMA ratios, Bollinger %B/width, ATR/price, macro returns, sentiment) under a **close-time rule**: a feature may only use what is known when the asset's daily close is fixed — same-day macro values for Bitcoin (00:00 UTC bar), previous-day values for the metals (13:30 ET COMEX settlement) (the feature dictionary is Table 8 of `docs/FYP_Technical_Report.pdf`).
 3. Predicts the **next-day log return** `y = ln(P_{t+1}/P_t)` and converts it to a price.
 4. Compares **Naive (random walk), historical mean, ARIMA, Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM and a stacked ensemble** under **expanding-window walk-forward validation**, tunes hyper-parameters on validation only, and evaluates the untouched test set **once** with return-space metrics, directional accuracy with significance, a Diebold–Mariano test against the random walk, and a strategy backtest.
-5. Serves one **combined forecast** — the equal-weight mean of all six trained models, so the user never picks a model — in a **Streamlit dashboard** (Run prediction, **Predict-a-Day demo on the unseen test period**, test-set history, performance and methodology tabs) and a **FastAPI** endpoint, always alongside its held-out metrics, an uncertainty band and a disclaimer.
+5. Serves one **combined forecast** — the equal-weight mean of all six trained models, so the user never picks a model — in a **Streamlit dashboard** (Run prediction, **Predict-a-Day demo on the unseen test period**, test-set history, performance and methodology tabs) and a **FastAPI** endpoint, always alongside its held-out metrics, a **conditional ±1σ band** (`P_t·exp(r̂ ± σ_t)`, σ_t = EWMA volatility at the last complete bar — the one quantity this data does predict) and a disclaimer.
 6. Logs design experiments — data size, feature ablation, horizon, volatility target — and a before/after comparison on identical unseen days (`results/experiments/`).
 
 The central research question is honest: *does any model beat the random walk at a one-day horizon, and by how much?* Answer (`docs/FYP_Technical_Report.pdf` §14–15): **no — not for Bitcoin, Gold or Silver.** The served combined forecast's return-RMSE is within ±0.3 % of the random walk's on the unseen 2026 test window (Diebold–Mariano p = 0.46–0.97), directional accuracy 47–54 % (none significant); no single model does better. An intermediate version reported 62 % for Silver; the final audit traced it to a close-time leak (same-day macro features against a 13:30 ET futures settlement), fixed it and re-ran everything (`docs/FYP_Technical_Report.pdf` §11 and §15.2).
@@ -27,6 +27,8 @@ Served (Combined) forecast vs the random walk on the untouched test set (`result
 | | | Random walk | 58.26 | 75.76 | 1.29 % | 0.01671 | −0.002 | — | — | — |
 | Silver | 143 | **Combined** | 1.78 | 2.37 | 2.47 % | 0.03180 | +0.005 | 53.8 % (0.20) | 91 % / 52 % | 0.46 |
 | | | Random walk | 1.79 | 2.37 | 2.49 % | 0.03189 | −0.001 | — | — | — |
+
+Uncertainty band (`results/band_calibration.csv`, nominal coverage 68 % for ±1σ): see the table in `results/FINAL_RESULTS.md` — the served conditional band is compared with a fixed-width band on validation and test.
 
 Reading: every error metric is within ±0.4 % of the random walk (no difference is significant), R² of the return is ≈ 0, and no directional hit-rate is significantly above 50 %. The predicted returns have a standard deviation of ~0.1 % against ~2 % for actual returns — the models have learned that the next-day move is essentially unpredictable and stay near "no change". For Gold and Silver the forecast says UP on 91–97 % of days, so its direction call is the assets' average drift rather than a timing signal. Full tables (every model, walk-forward folds, regimes, experiments) in **`results/FINAL_RESULTS.md`**; interpretation in **`docs/FYP_Technical_Report.pdf`** §14–15; figures in `results/figures/`.
 
@@ -57,13 +59,13 @@ Reading: every error metric is within ±0.4 % of the random walk (no difference 
 │   │   └── before_after.py      3-year system vs improved system on identical unseen days
 │   ├── evaluation/
 │   │   ├── cross_validation.py  expanding-window folds
-│   │   ├── backtesting.py       ONE evaluation on the test set (every model + the Combined forecast), CV comparison, results tables
+│   │   ├── backtesting.py       ONE evaluation on the test set (every model + the Combined forecast), CV comparison, band calibration, results tables
 │   │   └── plots.py             report figures
-│   ├── inference/prediction.py  next-day prediction (Combined = mean of all trained models), predict-for-date demo
+│   ├── inference/prediction.py  next-day prediction (Combined = mean of all trained models, ±1σ EWMA-volatility band), predict-for-date demo
 │   ├── api/app.py               FastAPI
 │   └── utils/                   metrics (DM test, directional accuracy, backtest), reconstruction, seeds, logging
-├── tests/                     41 test cases: look-ahead (crypto + futures), close-time alignment, complete-bar rule, target alignment, split, reconstruction, metrics, combined inference, failure modes
-├── results/                   cv_results.csv · final_test_results.csv · regime_analysis.csv · FINAL_RESULTS.md · tuning/ · figures/ · predictions/ · experiments/ · archive_3y_final/ · archive_sameday_macro_leak/
+├── tests/                     43 test cases: look-ahead (crypto + futures), close-time alignment, complete-bar rule, target alignment, split, reconstruction, metrics, combined inference, conditional band, failure modes
+├── results/                   cv_results.csv · final_test_results.csv · band_calibration.csv · regime_analysis.csv · FINAL_RESULTS.md · tuning/ · figures/ · predictions/ · experiments/ · archive_3y_final/ · archive_sameday_macro_leak/
 ├── docs/                      FYP_Technical_Report.pdf — the complete technical report
 ├── notebooks/                 companion notebooks (load and display the script outputs)
 └── data/                      raw/ processed/ models/  (git-ignored except model_status.json)

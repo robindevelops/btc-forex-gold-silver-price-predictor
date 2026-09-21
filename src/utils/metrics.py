@@ -145,6 +145,18 @@ def evaluate_vol_forecast(true_logrv, pred_logrv, naive_logrv):
     }
 
 
+def band_calibration(true_ret, pred_ret, sigma):
+    """
+    Calibration of a ±1σ band around a return forecast: coverage = share of days with |r − r̂| ≤ σ_t (nominal 68.3 %
+    for a Gaussian ±1σ band), QLIKE of σ_t² as a variance forecast of the forecast error (lower is better) and the
+    mean band half-width in %.
+    """
+    true_ret, pred_ret, sigma = map(np.ravel, (true_ret, pred_ret, sigma))
+    e2 = (true_ret - pred_ret) ** 2
+    return {'n': int(len(e2)), 'coverage_pct': float(np.mean(np.abs(true_ret - pred_ret) <= sigma) * 100),
+            'qlike': qlike(e2, sigma ** 2), 'mean_sigma_pct': float(np.mean(sigma) * 100)}
+
+
 def evaluate_task(data, y_real_true, y_real_pred, naive_real, prev_close=None):
     """Dispatch on the task kind stored in the dataset dict."""
     if data['kind'] == 'vol':

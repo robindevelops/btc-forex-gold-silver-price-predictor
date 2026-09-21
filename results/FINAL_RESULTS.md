@@ -39,6 +39,16 @@ Test period 2026-02-18 → 2026-09-12 (207 days, 49% of them up days). Served fo
 | GRU | 1,075.86 | 1,458.31 | 1.54 | 0.02089 | -0.010 | 46.9 (207, 0.83) | 16 | 0.35 | -14.0 | +14.5 |
 | ARIMA | 1,067.96 | 1,459.44 | 1.53 | 0.02091 | -0.012 | 46.9 (207, 0.83) | 72 | 0.35 | -9.0 | +14.5 |
 
+### Uncertainty band served with the Combined forecast (±1σ, nominal coverage 68.3 %)
+
+| Split | Band | Days | Coverage % | QLIKE | Mean σ % |
+|---|---|---:|---:|---:|---:|
+| validation | **conditional** | 160 | 75.0 | 1.875 | 2.18 |
+| validation | fixed | 160 | 87.5 | 2.029 | 3.36 |
+| test | **conditional** | 207 | 73.9 | 1.767 | 2.21 |
+| test | fixed | 207 | 88.9 | 2.037 | 3.32 |
+conditional = σ_t is the EWMA volatility at day t (served); fixed = one width, the return std of the data before the split.
+
 ## Gold
 
 Test period 2026-02-18 → 2026-09-11 (143 days, 50% of them up days). Served forecast: **Combined** of Ridge, RandomForest, LightGBM, CatBoost, GRU, LSTM. Best single model by CV: *CatBoost* (CV RMSE 0.01110 vs naive 0.01114).
@@ -74,6 +84,16 @@ Test period 2026-02-18 → 2026-09-11 (143 days, 50% of them up days). Served fo
 | LSTM | 58.82 | 76.58 | 1.31 | 0.01687 | -0.022 | 49.7 (143, 0.57) | 100 | 0.28 | -10.7 | -10.6 |
 | Stacked | 58.95 | 77.28 | 1.31 | 0.01705 | -0.043 | 51.0 (143, 0.43) | 97 | 0.44 | -7.9 | -10.6 |
 
+### Uncertainty band served with the Combined forecast (±1σ, nominal coverage 68.3 %)
+
+| Split | Band | Days | Coverage % | QLIKE | Mean σ % |
+|---|---|---:|---:|---:|---:|
+| validation | **conditional** | 109 | 72.5 | 2.039 | 1.57 |
+| validation | fixed | 109 | 53.2 | 3.833 | 0.98 |
+| test | **conditional** | 143 | 75.5 | 1.392 | 1.84 |
+| test | fixed | 143 | 51.0 | 1.929 | 1.06 |
+conditional = σ_t is the EWMA volatility at day t (served); fixed = one width, the return std of the data before the split.
+
 ## Silver
 
 Test period 2026-02-18 → 2026-09-11 (143 days, 52% of them up days). Served forecast: **Combined** of Ridge, RandomForest, LightGBM, CatBoost, GRU, LSTM. Best single model by CV: *GRU* (CV RMSE 0.02387 vs naive 0.02391).
@@ -108,3 +128,13 @@ Test period 2026-02-18 → 2026-09-11 (143 days, 52% of them up days). Served fo
 | CatBoost | 1.79 | 2.38 | 2.49 | 0.03193 | -0.003 | 51.7 (143, 0.37) | 100 | 0.70 | -12.2 | -12.1 |
 | LSTM | 1.80 | 2.38 | 2.49 | 0.03198 | -0.006 | 51.7 (143, 0.37) | 100 | 0.63 | -12.2 | -12.1 |
 | ARIMA | 1.81 | 2.37 | 2.52 | 0.03226 | -0.024 | 52.4 (143, 0.31) | 55 | 0.50 | -3.2 | -12.1 |
+
+### Uncertainty band served with the Combined forecast (±1σ, nominal coverage 68.3 %)
+
+| Split | Band | Days | Coverage % | QLIKE | Mean σ % |
+|---|---|---:|---:|---:|---:|
+| validation | **conditional** | 109 | 57.8 | 1.936 | 3.70 |
+| validation | fixed | 109 | 45.0 | 7.403 | 1.92 |
+| test | **conditional** | 143 | 75.5 | 1.588 | 3.99 |
+| test | fixed | 143 | 54.5 | 1.806 | 2.27 |
+conditional = σ_t is the EWMA volatility at day t (served); fixed = one width, the return std of the data before the split.

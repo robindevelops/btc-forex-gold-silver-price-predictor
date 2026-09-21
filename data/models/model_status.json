@@ -61,8 +61,8 @@
       "DirAcc_pvalue": 0.8347342666337474,
       "UpCalls_pct": 36.71497584541063,
       "UpDays_pct": 49.275362318840585,
-      "DM_stat_vs_naive": -0.6897455119584126,
-      "DM_pvalue": 0.4911305049327448,
+      "DM_stat_vs_naive": -0.6897455119584127,
+      "DM_pvalue": 0.491130504932745,
       "pred_std": 0.0012177115680036968,
       "true_std": 0.020784526266299987,
       "strategy_return_pct": -5.131009566828193,
@@ -125,7 +125,20 @@
       "fear_greed"
     ],
     "target_mean": 0.0008517730949024871,
-    "target_std": 0.033603745510310555
+    "target_std": 0.033603745510310555,
+    "band": {
+      "rule": "P_t \u00b7 exp(r\u0302 \u00b1 \u03c3_t), \u03c3_t = ewma_vol at day t (RiskMetrics EWMA, \u03bb = 0.94)",
+      "sigma_feature": "ewma_vol",
+      "nominal_coverage_pct": 68.27,
+      "validation_conditional_coverage_pct": 75.0,
+      "validation_fixed_coverage_pct": 87.5,
+      "test_conditional_coverage_pct": 73.91304347826086,
+      "test_fixed_coverage_pct": 88.88888888888889,
+      "validation_conditional_qlike": 1.8748146252684876,
+      "validation_fixed_qlike": 2.0290077936782733,
+      "test_conditional_qlike": 1.7671144669809495,
+      "test_fixed_qlike": 2.0367341060482875
+    }
   },
   "Gold": {
     "primary_model": "CatBoost",
@@ -189,9 +202,9 @@
       "DirAcc_pvalue": 0.5000000000000004,
       "UpCalls_pct": 96.5034965034965,
       "UpDays_pct": 49.65034965034965,
-      "DM_stat_vs_naive": -0.03751930000586321,
+      "DM_stat_vs_naive": -0.03751930000586323,
       "DM_pvalue": 0.9701236463280274,
-      "pred_std": 0.0008977805278457371,
+      "pred_std": 0.0008977805278457372,
       "true_std": 0.01669282996577559,
       "strategy_return_pct": -7.943095033314007,
       "buy_hold_return_pct": -10.581820585411517,
@@ -252,7 +265,20 @@
       "vix_return"
     ],
     "target_mean": 0.0005406731545637338,
-    "target_std": 0.00975661296410699
+    "target_std": 0.00975661296410699,
+    "band": {
+      "rule": "P_t \u00b7 exp(r\u0302 \u00b1 \u03c3_t), \u03c3_t = ewma_vol at day t (RiskMetrics EWMA, \u03bb = 0.94)",
+      "sigma_feature": "ewma_vol",
+      "nominal_coverage_pct": 68.27,
+      "validation_conditional_coverage_pct": 72.47706422018348,
+      "validation_fixed_coverage_pct": 53.21100917431193,
+      "test_conditional_coverage_pct": 75.52447552447552,
+      "test_fixed_coverage_pct": 51.048951048951054,
+      "validation_conditional_qlike": 2.0394883717627064,
+      "validation_fixed_qlike": 3.8330634054596753,
+      "test_conditional_qlike": 1.3919844955025487,
+      "test_fixed_qlike": 1.9286962592045258
+    }
   },
   "Silver": {
     "primary_model": "GRU",
@@ -316,7 +342,7 @@
       "DirAcc_pvalue": 0.20155195456608488,
       "UpCalls_pct": 90.9090909090909,
       "UpDays_pct": 51.74825174825175,
-      "DM_stat_vs_naive": -0.7326985415582543,
+      "DM_stat_vs_naive": -0.7326985415582545,
       "DM_pvalue": 0.46495004502152293,
       "pred_std": 0.0008720909794104373,
       "true_std": 0.03188112386023935,
@@ -382,6 +408,19 @@
       "gold_return"
     ],
     "target_mean": 0.0004964678457063093,
-    "target_std": 0.019202262489862204
+    "target_std": 0.019202262489862204,
+    "band": {
+      "rule": "P_t \u00b7 exp(r\u0302 \u00b1 \u03c3_t), \u03c3_t = ewma_vol at day t (RiskMetrics EWMA, \u03bb = 0.94)",
+      "sigma_feature": "ewma_vol",
+      "nominal_coverage_pct": 68.27,
+      "validation_conditional_coverage_pct": 57.798165137614674,
+      "validation_fixed_coverage_pct": 44.95412844036697,
+      "test_conditional_coverage_pct": 75.52447552447552,
+      "test_fixed_coverage_pct": 54.54545454545454,
+      "validation_conditional_qlike": 1.9363431864449956,
+      "validation_fixed_qlike": 7.402707972721665,
+      "test_conditional_qlike": 1.5884343450954557,
+      "test_fixed_qlike": 1.806356411525023
+    }
   }
 }
