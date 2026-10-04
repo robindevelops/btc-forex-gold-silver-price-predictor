@@ -309,8 +309,8 @@ with tab_fc:
                                   'Says': 'UP ▲' if pred_m['direction'] == 'UP' else 'DOWN ▼',
                                   f'Direction right (last {sc["n_days"]} days)': f"{row['hits']} of {row['n_moved']} = {row['hit_pct']:.0f}%",
                                   'Avg. price error': f"{row['mae_pct']:.2f}%",
-                                  'vs "tomorrow = today"': f"{rw['mae_pct']:.2f}% → " + ('better' if row['mae_pct'] < rw['mae_pct'] - 1e-9 else
-                                                                                         ('same' if abs(row['mae_pct'] - rw['mae_pct']) < 0.005 else 'worse'))})
+                                  'vs "tomorrow = today"': f"{rw['mae_pct']:.2f}% → " + ('same' if abs(row['mae_pct'] - rw['mae_pct']) < 0.005 else    # equal at the shown precision
+                                                                                         ('better' if row['mae_pct'] < rw['mae_pct'] else 'worse'))})
                 st.dataframe(pd.DataFrame(table), width='stretch', hide_index=True)
                 st.markdown(
                     f"<div class='live'><span class='dot'>● LIVE</span> &nbsp;Scored at <b>{sc['computed_at'][11:]}</b> on {sc['computed_at'][:10]} in "
