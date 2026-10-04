@@ -165,6 +165,17 @@ if st.sidebar.button("Sync live market data", width='stretch',
     else:
         st.sidebar.warning("Yahoo Finance did not return data (rate limit). Using the stored dataset.")
 
+# Keep the live data current without a button press: when a newer daily bar should exist, download it. Checked at most
+# once every 30 minutes per asset (and never more often while Yahoo has not yet published the bar).
+_live_path = os.path.join(PROCESSED_DATA_DIR, f'{get_prefix(asset)}_live_features.csv')
+_checked = st.session_state.get(f'live_check_{asset}', 0)
+_fresh = os.path.exists(_live_path) and (time.time() - os.path.getmtime(_live_path)) < 30 * 60
+if not (live_data_is_current(asset) or _fresh or time.time() - _checked < 30 * 60):
+    st.session_state[f'live_check_{asset}'] = time.time()
+    with st.spinner(f"Checking Yahoo Finance for new {asset} data…"):
+        if update_live_data(asset, refresh_external=True):
+            st.cache_data.clear()
+
 df = load_features(asset)
 te_all = load_csv('final_test_results.csv')
 cv_all = load_csv('cv_results.csv')
@@ -402,18 +413,33 @@ with tab_fc:
 
 # ═══════════════════════════════════════════════ 2. PREDICT A DAY (unseen test period)
 with tab_demo:
-    st.subheader("Predict a day of the unseen test period")
+    st.subheader("Predict a day the models have never seen")
     st.markdown(f"Stand on any day after **{VAL_END}** — a period never used for training, validation or model selection. "
-                f"All models see data **only up to that day**, their combined forecast for the next trading day is shown, and the actual close is then revealed.")
+                f"All models see data **only up to that day**, their combined forecast for the next trading day is shown, and the actual close is then revealed. "
+                f"The list grows by itself: every new daily close published by Yahoo Finance adds a new day (marked **NEW**).")
     if hist is None or df is None:
         st.warning("Run `make evaluate` first to generate the unseen-test predictions.")
     else:
-        test_days = list(hist['date'].dt.date)
+        stored_days = list(hist['date'].dt.date)
+        new_days = ([d for d in df['timestamp'].dt.date if d > stored_days[-1]] if df.attrs.get('source') == 'live download' else [])
+        test_days = stored_days + new_days
+        newest = test_days[-1]
+        new_set = set(new_days)
+
+        def _day_label(d):
+            lab = d.strftime('%Y-%m-%d (%a)')
+            if d in new_set:
+                lab += '  · NEW' + ('  · next close not published yet' if d == newest else '')
+            return lab
+
         c1, c2 = st.columns([3, 1])
         with c1:
-            pick = st.selectbox("Stand on this day (data available up to and including it)", test_days, index=len(test_days) - 1,
+            pick = st.selectbox("Stand on this day (data available up to and including it)", test_days[::-1], index=1 if new_days else 0,
                                 on_change=lambda: st.session_state.update(open_tab="Predict a Day (unseen test)"),
-                                format_func=lambda d: d.strftime('%Y-%m-%d (%a)'))
+                                format_func=_day_label)
+        st.caption(f"{len(stored_days)} days of the stored test period ({stored_days[0]} → {stored_days[-1]})"
+                   + (f" + **{len(new_days)} newer days** from the latest download ({new_days[0]} → {new_days[-1]})" if new_days else "")
+                   + f". Newest first; the most recent close is {df['timestamp'].iloc[-1].date()}.")
         with c2:
             st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
             go_demo = st.button("▶ Run models live", type="primary", width='stretch',
@@ -447,7 +473,7 @@ with tab_demo:
                     f"<div class='live'><span class='dot'>● LIVE</span> &nbsp;Computed at <b>{r['computed_at'][11:]}</b> on {r['computed_at'][:10]} in "
                     f"<b>{r['compute_seconds']:.1f} s</b> · <b>{len(r['individual'])} models</b> loaded and run · data used: "
                     f"<b>{r['history_start']} → {r['as_of_date']}</b> ({r['rows_used']:,} days; the models' 30-day input window starts "
-                    f"{r['window_start']}) · <b>{r['rows_hidden']:,} later day{'s' if r['rows_hidden'] != 1 else ''} hidden</b> from the models. Press ▶ again to recompute.</div>",
+                    f"{r['window_start']}; {r['data_source']}) · <b>{r['rows_hidden']:,} later day{'s' if r['rows_hidden'] != 1 else ''} hidden</b> from the models. Press ▶ again to recompute.</div>",
                     unsafe_allow_html=True)
                 m1, m2, m3, m4, m5 = st.columns(5)
                 m1.metric(f"Close on {r['as_of_date']}", usd(r['current_price']))

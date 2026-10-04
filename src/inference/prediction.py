@@ -218,15 +218,22 @@ def predict_next_day(asset, model_name=COMBINED):
 
 def predict_for_date(asset, as_of, model_name=COMBINED, progress=None):
     """
-    Demonstration mode on the FROZEN dataset: stand on day `as_of`, use ONLY data up to that day, predict the
-    next trading day, then reveal the actual close (if the next day exists in the data) and the error.
+    Demonstration mode: stand on day `as_of`, use ONLY data up to that day, predict the next trading day, then reveal
+    the actual close (if the next day exists in the data) and the error.
+    Days of the stored test period use the FROZEN dataset (so they reproduce results/predictions exactly); days newer than
+    it use the latest live download, so the demo grows by one day every time a new bar is published.
     Days after config.VAL_END are outside the model's training data (unseen test period).
     """
     status = load_model_status().get(asset, {})
     model_name = model_name or COMBINED
-    feats = load_features(asset, live=False)              # the frozen dataset the test results were computed on
+    frozen = load_features(asset, live=False)             # the frozen dataset the test results were computed on
+    ts = pd.Timestamp(as_of)
+    in_frozen = ts in frozen.index and frozen.index.get_loc(ts) + 1 < len(frozen)
+    feats = frozen if in_frozen else load_features(asset, live=True)
     t_start = time.perf_counter()
     Xseq, Xt, last_close, as_of_ts, cols = _window(asset, feats, as_of)
+    if as_of_ts.normalize() != ts.normalize():
+        raise ValueError(f"No {asset} bar on {ts.date()} in the data (latest bar up to it: {as_of_ts.date()})")
     r_hat, members = _predict_from_window(asset, model_name, Xseq, Xt, progress)
     compute_seconds = time.perf_counter() - t_start
     pred_price = last_close * np.exp(r_hat)
@@ -243,6 +250,8 @@ def predict_for_date(asset, as_of, model_name=COMBINED, progress=None):
         'computed_at': dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), 'compute_seconds': compute_seconds,
         'rows_used': int((feats.index <= as_of_ts).sum()), 'rows_hidden': int((feats.index > as_of_ts).sum()),
         'history_start': str(feats.index[0].date()), 'window_start': str(feats.index[max(pos - SEQ_LEN + 1, 0)].date()),
+        'data_source': 'frozen dataset (stored test period)' if in_frozen else 'latest live download',
+        'after_stored_test': not in_frozen,
     }
     if pos + 1 < len(feats):
         actual = float(feats['price'].iloc[pos + 1])

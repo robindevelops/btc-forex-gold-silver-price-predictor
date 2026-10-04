@@ -2,7 +2,7 @@
 
 *Final Year Project (BSCS) — a leakage-audited, walk-forward-validated comparison of statistical, tree-based and recurrent models against the random-walk baseline, with a live prediction dashboard and API.*
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16-orange) ![LightGBM](https://img.shields.io/badge/LightGBM-4.6-green) ![Streamlit](https://img.shields.io/badge/Streamlit-1.50-red) ![Tests](https://img.shields.io/badge/tests-46%20passing-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.16-orange) ![LightGBM](https://img.shields.io/badge/LightGBM-4.6-green) ![Streamlit](https://img.shields.io/badge/Streamlit-1.50-red) ![Tests](https://img.shields.io/badge/tests-47%20passing-brightgreen)
 
 ## What the project does
 
@@ -81,7 +81,7 @@ Reading: every error metric is within ±0.4 % of the random walk (no difference 
 │   ├── inference/prediction.py  next-day prediction (Combined = mean of all trained models, calibrated 68 % EWMA-volatility band), predict-for-date demo
 │   ├── api/app.py               FastAPI
 │   └── utils/                   metrics (DM test, directional accuracy, backtest), reconstruction, seeds, logging
-├── tests/                     46 test cases: look-ahead (crypto + futures), close-time alignment, complete-bar rule, target alignment, split, reconstruction, metrics, combined inference, conditional band, failure modes
+├── tests/                     47 test cases: look-ahead (crypto + futures), close-time alignment, complete-bar rule, target alignment, split, reconstruction, metrics, combined inference, conditional band, failure modes
 ├── results/                   cv_results.csv · final_test_results.csv · walkforward_pooled.csv · band_calibration.csv · regime_analysis.csv · FINAL_RESULTS.md · tuning/ · figures/ · predictions/ · experiments/ · archive_3y_final/ · archive_sameday_macro_leak/
 ├── docs/                      FYP_Technical_Report.pdf — the complete technical report
 ├── notebooks/                 companion notebooks (load and display the script outputs)

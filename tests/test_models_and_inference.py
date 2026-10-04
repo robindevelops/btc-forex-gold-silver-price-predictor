@@ -154,3 +154,19 @@ def test_live_track_record_is_recomputed_and_consistent():
     assert rows[COMBINED]['hits'] == int((t['days']['hit'] == True).sum())          # noqa: E712  (object column with None)
     assert all(np.isfinite(r['mae_pct']) for r in t['rows'])
     assert np.allclose(t['days']['predicted'], t['days']['close'] * np.exp(t['days']['predicted_pct'] / 100))
+
+
+@pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'model_status.json')), reason="models not trained")
+def test_predict_a_day_grows_with_new_live_days():
+    """Days of the stored test use the frozen data; newer days come from the live download; the newest has no actual yet;
+    a date without a bar (weekend for futures) is rejected instead of silently using an earlier day."""
+    import src.inference.prediction as pr
+    frozen, live = pr.load_features('Gold', live=False), pr.load_features('Gold', live=True)
+    r_old = pr.predict_for_date('Gold', str(frozen.index[-10].date()))
+    assert not r_old['after_stored_test']
+    if live.index[-1] <= frozen.index[-1]:
+        pytest.skip("no live data newer than the frozen dataset")
+    r_new = pr.predict_for_date('Gold', str(live.index[-1].date()))
+    assert r_new['after_stored_test'] and r_new['actual_price'] is None
+    with pytest.raises(ValueError):
+        pr.predict_for_date('Gold', str((live.index[-1] + pd.offsets.Week(weekday=6)).date()))   # a Sunday
