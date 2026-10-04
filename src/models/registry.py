@@ -187,6 +187,8 @@ class LightGBMModel(BaseModel):
         import lightgbm as lgb
         params = dict(self.params)
         n_est = params.pop('n_estimators', 300)
+        # NB: LightGBM only applies `subsample` (row bagging) when `subsample_freq` > 0; it is left at the default 0, so the
+        # 0.8 in the tuning grid is inert and every tree sees all rows (the reported results were produced this way).
         base = dict(random_state=42, n_jobs=-1, verbose=-1, **params)
         if Xt_val is not None and y_val is not None:
             # phase 1: early stopping on val to find the number of trees

@@ -35,6 +35,7 @@ figures:                 ## report figures into results/figures/
 
 experiments:             ## design experiments (validation only) + before/after comparison on identical unseen days
 	$(PY) src/experiments/run_experiments.py
+	$(PY) src/experiments/audit_improvements.py
 	$(PY) src/experiments/before_after.py
 
 pipeline: preprocess eda tune train stack evaluate figures experiments test   ## full reproducible run from raw data

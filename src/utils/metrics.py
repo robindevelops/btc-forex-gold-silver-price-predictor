@@ -147,9 +147,9 @@ def evaluate_vol_forecast(true_logrv, pred_logrv, naive_logrv):
 
 def band_calibration(true_ret, pred_ret, sigma):
     """
-    Calibration of a ±1σ band around a return forecast: coverage = share of days with |r − r̂| ≤ σ_t (nominal 68.3 %
-    for a Gaussian ±1σ band), QLIKE of σ_t² as a variance forecast of the forecast error (lower is better) and the
-    mean band half-width in %.
+    Calibration of a symmetric band r̂ ± h_t around a return forecast (h_t = the band half-width, e.g. k·σ_t): coverage =
+    share of days with |r − r̂| ≤ h_t (the served band targets 68.3 %), QLIKE of h_t² as a variance forecast of the forecast
+    error (meaningful for h_t = σ_t; lower is better) and the mean half-width in % ('mean_sigma_pct').
     """
     true_ret, pred_ret, sigma = map(np.ravel, (true_ret, pred_ret, sigma))
     e2 = (true_ret - pred_ret) ** 2

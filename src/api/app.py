@@ -49,8 +49,10 @@ class PredictionResponse(BaseModel):
     is_served_model: bool
     cv_selected_model: Optional[str] = None
     individual: Optional[List[MemberPrediction]] = None
-    uncertainty_band: Optional[List[float]] = None      # ±1σ price band, σ_t = EWMA volatility at the last complete bar
+    uncertainty_band: Optional[List[float]] = None      # 68 % price band P_t·exp(r̂ ± k·σ_t), σ_t = EWMA volatility at the last complete bar
     band_sigma_pct: Optional[float] = None
+    band_k: Optional[float] = None                      # calibrated multiplier k (walk-forward errors of the training period)
+    band_halfwidth_pct: Optional[float] = None          # k·σ_t in %
     band_rule: Optional[str] = None
     band_calibration: Optional[Dict[str, Any]] = None    # coverage / QLIKE of that band on validation and test
     data_source: Optional[str] = None

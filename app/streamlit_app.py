@@ -9,9 +9,8 @@ Layout
   Overview strip            what is predicted · the served forecast · its reliability on the unseen test period
   1 Forecast                latest market data · Run prediction → one combined next-day forecast (+ each model) · charts
   2 Predict a Day           stand on any unseen test day, predict, reveal the actual close and the error
-  3 Test-Set History        every unseen test day: predicted vs actual, error, direction hit (CSV download)
-  4 Model Performance       test table · honest reading · comparison chart · walk-forward table · predicted vs actual
-  5 Methodology             target, data, split, features, models, how the combination works
+  3 Model Performance       test table · honest reading · comparison chart · walk-forward table · predicted vs actual
+  4 Methodology             target, data, split, features, models, how the combination works
 """
 import os
 import sys
@@ -30,6 +29,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from config import (PROCESSED_DATA_DIR, RESULTS_DIR, FIGURES_DIR, PREDICTION_HORIZON_DAYS,
                     TRAIN_END, VAL_END, ASSETS, ASSET_CONFIG, get_prefix, load_model_status)
 from src.inference.prediction import (predict_next_day, predict_for_date, prediction_history, combined_members, live_data_is_current,
+                                      recent_track_record,
                                       COMBINED, DISCLAIMER)
 from src.data.market_calendar import expected_last_complete_bar
 from src.data.sync_live_data import update_live_data
@@ -56,6 +56,9 @@ st.markdown("""
   .final .lbl { color: #A0A4AB; font-size: 0.85rem; }
   .final .big { font-size: 2.1rem; font-weight: 700; color: #FFFFFF; font-family: 'Inter', sans-serif; }
   .final .up { color: #2ECC71; } .final .down { color: #FF5252; }
+  .live { background: #0F2A1E; border: 1px solid #2ECC71; border-radius: 8px; padding: 0.55rem 0.9rem; margin: 0.3rem 0 0.7rem 0;
+          color: #D6F5E3; font-size: 0.9rem; line-height: 1.55; }
+  .live b { color: #FFFFFF; } .live .dot { color: #2ECC71; font-weight: 700; }
   .footer { color: #8A8F98; font-size: 0.8rem; margin-top: 2rem; border-top: 1px solid #262C38; padding-top: 0.6rem; }
 </style>""", unsafe_allow_html=True)
 
@@ -133,9 +136,11 @@ cv_best = status.get('primary_model')
 if _qp.get('run') == '1':
     st.session_state['run_prediction'] = True
 if st.sidebar.button("Run prediction", type="primary", width='stretch',
-                     help="Downloads the latest complete bar, runs every trained model and combines them into one forecast."):
+                     help="Downloads the latest complete bar, runs every trained model and combines them into one forecast.",
+                     on_click=lambda: st.session_state.update(open_tab="Forecast")):
     st.session_state['run_prediction'] = True
     st.session_state.pop('run_result', None)
+    st.session_state.pop('run_score', None)                 # the live scorecard is recomputed on every press
 st.session_state.setdefault('run_prediction', False)
 st.sidebar.caption(f"Runs **all {len(members)} trained models** ({', '.join(members) or 'none'}) and serves their "
                    f"equal-weight combination. No model to choose.")
@@ -190,8 +195,9 @@ if tm and tn:
 else:
     st.info("No evaluation found. Run `make evaluate` (python src/evaluation/backtesting.py) first.")
 
-tab_fc, tab_demo, tab_hist, tab_perf, tab_meth = st.tabs(
-    ["Forecast", "Predict a Day (unseen test)", "Test-Set History", "Model Performance", "Methodology"])
+TAB_LABELS = ["Forecast", "Predict a Day (unseen test)", "Model Performance", "Methodology"]
+# a button press reruns the script; `open_tab` (set by the button's on_click) keeps the user on the tab they pressed it in
+tab_fc, tab_demo, tab_perf, tab_meth = st.tabs(TAB_LABELS, default=st.session_state.get('open_tab', TAB_LABELS[0]))
 
 # ═══════════════════════════════════════════════ 1. FORECAST
 with tab_fc:
@@ -253,24 +259,65 @@ with tab_fc:
                     cal = r.get('band_calibration') or {}
                     cov = cal.get('test_conditional_coverage_pct'); cov_fixed = cal.get('test_fixed_coverage_pct')
                     cal_txt = (f" On the unseen test period this band contained the actual close on **{cov:.0f}%** of days "
-                               f"(nominal 68% for ±1σ; a fixed-width band: {cov_fixed:.0f}%)." if cov is not None and cov_fixed is not None else "")
-                    st.caption(f"**±1σ band: {usd_md(band[0])} – {usd_md(band[1])}** — σ = {r['band_sigma_pct']:.2f}%, the EWMA volatility of "
-                               f"{asset}'s returns up to {r['as_of_date']}, so the band widens in volatile periods and narrows in calm ones. "
+                               f"(nominal 68%; a fixed-width band: {cov_fixed:.0f}%)." if cov is not None and cov_fixed is not None else "")
+                    st.caption(f"**68% band: {usd_md(band[0])} – {usd_md(band[1])}** — ±{r['band_halfwidth_pct']:.2f}% = {r['band_k']:.2f} × σ, where "
+                               f"σ = {r['band_sigma_pct']:.2f}% is the EWMA volatility of {asset}'s returns up to {r['as_of_date']} (so the band widens in "
+                               f"volatile periods and narrows in calm ones) and {r['band_k']:.2f} was calibrated on the training period's walk-forward errors. "
                                f"It is far wider than the predicted move — that is the honest picture of next-day uncertainty.{cal_txt}")
 
-                # each model's own prediction and the combination
-                t = pd.DataFrame(r['individual'])
-                t = pd.concat([t, pd.DataFrame([{'model': 'Combined (served)', 'predicted_price': r['predicted_price'],
-                                                 'predicted_return_pct': r['predicted_return_pct'], 'direction': r['direction']}])], ignore_index=True)
-                t['Predicted close'] = t['predicted_price'].map(usd)
-                t['Change'] = t['predicted_return_pct'].map(lambda v: f"{v:+.2f}%")
-                t['Direction'] = t['direction'].map({'UP': 'UP ▲', 'DOWN': 'DOWN ▼'})
-                st.markdown("**What each model predicted** (the served forecast is the equal-weight mean of the six predicted returns)")
-                st.dataframe(t[['model', 'Predicted close', 'Change', 'Direction']].rename(columns={'model': 'Model'}),
-                             width='stretch', hide_index=True)
+                # each model's prediction for tomorrow + its live scorecard on the most recent days
+                st.markdown("#### Each model: tomorrow's prediction and how it did on the most recent days — calculated live")
+                n_score = st.select_slider("Score every model on the last … days", options=[20, 30, 60, 90], value=30,
+                                           on_change=lambda: st.session_state.update(open_tab="Forecast"),
+                                           help="Each model is re-run now for every one of these days, seeing only the data up to that day, "
+                                                "and its forecast is checked against the next day's actual close.")
+                score_key = (asset, r['as_of_date'], n_score)
+                if st.session_state.get('run_score', (None,))[0] != score_key:
+                    with st.status(f"Scoring {len(r['individual'])} models live on the last {n_score} days…", expanded=True) as score_box:
+                        st.write(f"For each of the last {n_score} days the models get **only the data up to that day**, predict the next day, "
+                                 "and the prediction is compared with the real close:")
+
+                        def _scored(model_name, secs):
+                            took = f"{secs * 1000:.0f} ms" if secs < 1 else f"{secs:.1f} s"
+                            st.write(f"✔ **{model_name}** — {n_score} predictions made and checked in {took}")
+
+                        sc = recent_track_record(asset, n_score, progress=_scored)
+                        score_box.update(label=f"Live scorecard ready — {sc['n_days']} days × {len(r['individual'])} models in "
+                                               f"{sc['compute_seconds']:.1f} s ({sc['computed_at'][11:]})", state="complete", expanded=False)
+                    st.session_state['run_score'] = (score_key, sc)
+                sc = st.session_state['run_score'][1]
+                by_model = {row['model']: row for row in sc['rows']}
+                rw = by_model['Random walk']
+                tomorrow = {m['model']: m for m in r['individual']}
+                tomorrow[COMBINED] = {'predicted_price': r['predicted_price'], 'predicted_return_pct': r['predicted_return_pct'], 'direction': r['direction']}
+                table = []
+                for m in list(tomorrow):
+                    row, pred_m = by_model[m], tomorrow[m]
+                    table.append({'Model': 'Combined (served)' if m == COMBINED else m,
+                                  f"Prediction for {target}": f"{usd(pred_m['predicted_price'])} ({pred_m['predicted_return_pct']:+.2f}%)",
+                                  'Says': 'UP ▲' if pred_m['direction'] == 'UP' else 'DOWN ▼',
+                                  f'Direction right (last {sc["n_days"]} days)': f"{row['hits']} of {row['n_moved']} = {row['hit_pct']:.0f}%",
+                                  'Avg. price error': f"{row['mae_pct']:.2f}%",
+                                  'vs "tomorrow = today"': f"{rw['mae_pct']:.2f}% → " + ('better' if row['mae_pct'] < rw['mae_pct'] - 1e-9 else
+                                                                                         ('same' if abs(row['mae_pct'] - rw['mae_pct']) < 0.005 else 'worse'))})
+                st.dataframe(pd.DataFrame(table), width='stretch', hide_index=True)
+                st.markdown(
+                    f"<div class='live'><span class='dot'>● LIVE</span> &nbsp;Scored at <b>{sc['computed_at'][11:]}</b> on {sc['computed_at'][:10]} in "
+                    f"<b>{sc['compute_seconds']:.1f} s</b>: every model re-run on <b>{sc['n_days']} days</b> ({sc['first_day']} → {sc['last_day']}, "
+                    f"checked against the closes up to {sc['last_target']}; {sc['data_source']}). All {sc['n_after_training']} days are after the models' "
+                    f"training data ended ({VAL_END}); <b>{sc['n_after_frozen_test']} of them are newer than every stored result</b> — nobody had "
+                    f"scored them before you pressed the button.</div>", unsafe_allow_html=True)
+                with st.expander(f"Day by day — the combined forecast on each of the last {sc['n_days']} days"):
+                    dd = sc['days'].iloc[::-1]
+                    st.dataframe(pd.DataFrame({'Stood on': dd['date'], 'Predicted for': dd['target_date'], 'Close that day': dd['close'].map(usd),
+                                               'Predicted': dd['predicted'].map(usd) + ' (' + dd['predicted_pct'].map(lambda v: f"{v:+.2f}%") + ')',
+                                               'Actual': dd['actual'].map(usd) + ' (' + dd['actual_pct'].map(lambda v: f"{v:+.2f}%") + ')',
+                                               'Direction': dd['hit'].map(lambda v: 'HIT ✔' if v is True else ('FAIL ✘' if v is False else 'flat'))}),
+                                 width='stretch', hide_index=True)
                 n_up = sum(m['direction'] == 'UP' for m in r['individual'])
-                st.caption(f"{n_up} of {len(r['individual'])} models say UP. The models agree to within a fraction of a percent because "
-                           "daily returns are mostly noise: every model has learned to stay close to \"no change\".")
+                st.caption(f"{n_up} of {len(r['individual'])} models say UP for {target}. {sc['n_days']} days is a small sample, so these live scores "
+                           "jump around from week to week; the long-run evidence (thousands of days) is on the Model Performance tab. Every model stays "
+                           "close to \"no change\" because daily returns are mostly noise.")
 
                 # forecast chart: last 60 days + next day
                 tail = df.tail(60)
@@ -279,7 +326,7 @@ with tab_fc:
                 fh.add_trace(go.Scatter(x=tail['timestamp'], y=tail['price'], mode='lines', name='close',
                                         line=dict(color=COLOR[asset], width=2)))
                 if band:
-                    fh.add_trace(go.Scatter(x=[next_date, next_date], y=band, mode='lines', name='±1σ band (EWMA vol)',
+                    fh.add_trace(go.Scatter(x=[next_date, next_date], y=band, mode='lines', name='68% band (EWMA vol)',
                                             line=dict(color=BAND, width=8)))
                 fh.add_trace(go.Scatter(x=[tail['timestamp'].iloc[-1], next_date], y=[r['current_price'], r['predicted_price']],
                                         mode='lines+markers', name='combined forecast',
@@ -365,14 +412,43 @@ with tab_demo:
         c1, c2 = st.columns([3, 1])
         with c1:
             pick = st.selectbox("Stand on this day (data available up to and including it)", test_days, index=len(test_days) - 1,
+                                on_change=lambda: st.session_state.update(open_tab="Predict a Day (unseen test)"),
                                 format_func=lambda d: d.strftime('%Y-%m-%d (%a)'))
         with c2:
             st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
-            go_demo = st.button("Generate prediction", type="primary", width='stretch')
-        if go_demo or st.session_state.get('demo_done'):
-            st.session_state['demo_done'] = True
+            go_demo = st.button("▶ Run models live", type="primary", width='stretch',
+                                help="Runs all trained models now, on data up to the chosen day only, then reveals the actual close.",
+                                on_click=lambda: st.session_state.update(open_tab="Predict a Day (unseen test)"))
+        stored = st.session_state.get('demo_result')
+        if not go_demo and not (stored and stored[0] == asset and stored[1] == pick):
+            st.info(f"Press **▶ Run models live**: the {len(members)} models will be loaded and run now on the data up to {pick}, "
+                    "one after another, and you will see each result as it is computed.")
+        else:
             try:
-                r = predict_for_date(asset, str(pick), COMBINED)
+                if go_demo:
+                    with st.status(f"Running {len(members)} models live for {pick}…", expanded=True) as run_box:
+                        st.write(f"**① Hiding the future** — the models only receive {asset} data up to **{pick}**; every later day is removed.")
+                        st.write(f"**② Running the models** on the last 30 days of features:")
+
+                        def _show(model_name, r_hat, secs):
+                            took = f"{secs * 1000:.0f} ms" if secs < 1 else f"{secs:.1f} s"
+                            st.write(f"✔ **{model_name}** predicts {r_hat * 100:+.3f}% for the next day  ·  computed in {took}")
+
+                        r = predict_for_date(asset, str(pick), COMBINED, progress=_show)
+                        st.write(f"**③ Averaging** the {len(r['individual'])} predictions → **{r['predicted_return_pct']:+.3f}%** → "
+                                 f"predicted close **{usd_md(r['predicted_price'])}**")
+                        st.write(f"**④ Revealing** the actual close of {r['actual_date'] or 'the next day'} from the data and scoring the prediction.")
+                        run_box.update(label=f"Live prediction finished in {r['compute_seconds']:.1f} s ({r['computed_at'][11:]})",
+                                       state="complete", expanded=True)
+                    st.session_state['demo_result'] = (asset, pick, r)
+                else:
+                    r = stored[2]
+                st.markdown(
+                    f"<div class='live'><span class='dot'>● LIVE</span> &nbsp;Computed at <b>{r['computed_at'][11:]}</b> on {r['computed_at'][:10]} in "
+                    f"<b>{r['compute_seconds']:.1f} s</b> · <b>{len(r['individual'])} models</b> loaded and run · data used: "
+                    f"<b>{r['history_start']} → {r['as_of_date']}</b> ({r['rows_used']:,} days; the models' 30-day input window starts "
+                    f"{r['window_start']}) · <b>{r['rows_hidden']:,} later day{'s' if r['rows_hidden'] != 1 else ''} hidden</b> from the models. Press ▶ again to recompute.</div>",
+                    unsafe_allow_html=True)
                 m1, m2, m3, m4, m5 = st.columns(5)
                 m1.metric(f"Close on {r['as_of_date']}", usd(r['current_price']))
                 m2.metric(f"Predicted close for {r['actual_date'] or 'next day'}", usd(r['predicted_price']), f"{r['predicted_return_pct']:+.2f}%")
@@ -382,8 +458,8 @@ with tab_demo:
                     hit = r['direction_hit']
                     m5.metric("Direction", f"{r['direction']} → {'HIT ✔' if hit else ('FAIL ✘' if hit is not None else 'flat')}")
                     b = r['uncertainty_band']
-                    st.caption(f"±1σ band for that day: **{usd_md(b[0])} – {usd_md(b[1])}** (σ = {r['band_sigma_pct']:.2f}% from the volatility known on "
-                               f"{r['as_of_date']}) — the actual close fell **{'inside' if r['in_band'] else 'outside'}** it.")
+                    st.caption(f"68% band for that day: **{usd_md(b[0])} – {usd_md(b[1])}** (±{r['band_halfwidth_pct']:.2f}% = {r['band_k']:.2f} × the volatility "
+                               f"known on {r['as_of_date']}) — the actual close fell **{'inside' if r['in_band'] else 'outside'}** it.")
                 else:
                     m3.metric("Actual close", "not yet known")
                 st.caption(f"Forecast: **combined** of {len(r['individual'])} models · horizon {r['horizon_days']} trading day · "
@@ -400,7 +476,7 @@ with tab_demo:
                     if f'band_lo_{COMBINED}' in hist.columns:
                         fd.add_trace(go.Scatter(x=pd.concat([hist['target_date'], hist['target_date'][::-1]]),
                                                 y=pd.concat([hist[f'band_hi_{COMBINED}'], hist[f'band_lo_{COMBINED}'][::-1]]),
-                                                fill='toself', fillcolor='rgba(0,224,198,0.12)', line=dict(width=0), name='±1σ band (EWMA vol)', hoverinfo='skip'))
+                                                fill='toself', fillcolor='rgba(0,224,198,0.12)', line=dict(width=0), name='68% band (EWMA vol)', hoverinfo='skip'))
                     if r['actual_price'] is not None:
                         fd.add_trace(go.Scatter(x=[pd.Timestamp(r['actual_date'])], y=[r['predicted_price']], mode='markers', name='this prediction',
                                                 marker=dict(color=ACCENT, size=13, symbol='diamond', line=dict(color='white', width=1))))
@@ -425,45 +501,7 @@ with tab_demo:
                 st.error(f"Prediction failed: {e}")
                 logger.exception("Demo prediction error")
 
-# ═══════════════════════════════════════════════ 3. TEST-SET HISTORY
-with tab_hist:
-    st.subheader("Test-set history — every unseen day, combined forecast")
-    if hist is None or f'pred_close_{COMBINED}' not in hist.columns:
-        st.warning("Run `make evaluate` first.")
-    else:
-        m = COMBINED
-        e_m, e_n = hist[f'error_pct_{m}'].abs(), hist['error_pct_Naive'].abs()
-        hits = int(hist[f'direction_hit_{m}'].sum())
-        up_calls, up_days = (hist[f'pred_return_{m}'] > 0).mean() * 100, (hist['actual_return'] > 0).mean() * 100
-        st.caption(f"{len(hist)} unseen days, {hist['target_date'].min().date()} → {hist['target_date'].max().date()}. Summary of the table below:")
-        in_band = hist[f'in_band_{COMBINED}'] if f'in_band_{COMBINED}' in hist.columns else None
-        st.dataframe(pd.DataFrame({'': ['Combined forecast', 'Random walk'],
-                                   'Mean abs. error (% of price)': [f"{e_m.mean():.2f}%", f"{e_n.mean():.2f}%"],
-                                   **({'Actual inside ±1σ band': [f"{in_band.mean() * 100:.1f}% of days (nominal 68%)", '—']} if in_band is not None else {}),
-                                   'Median abs. error (% of price)': [f"{e_m.median():.2f}%", f"{e_n.median():.2f}%"],
-                                   'Largest miss': [f"{e_m.max():.2f}%", f"{e_n.max():.2f}%"],
-                                   'Direction correct': [f"{hits / len(hist) * 100:.1f}% ({hits} of {len(hist)} days; chance ≈ 50%)", '— (no direction)'],
-                                   'Says UP on': [f"{up_calls:.0f}% of days ({up_days:.0f}% were up)", '—']}),
-                     width='stretch', hide_index=True)
-        h = pd.DataFrame({'Predicted on': hist['date'].dt.date, 'For': hist['target_date'].dt.date,
-                          'Predicted ($)': hist[f'pred_close_{m}'].round(2), 'Actual ($)': hist['actual_close'].round(2),
-                          'Error ($)': (hist[f'pred_close_{m}'] - hist['actual_close']).round(2),
-                          'Error (%)': hist[f'error_pct_{m}'].round(2),
-                          'Random walk error (%)': hist['error_pct_Naive'].round(2),
-                          'Direction': hist[f'direction_hit_{m}'].map({1: 'HIT', 0: 'FAIL'}),
-                          **({'±1σ band': hist[f'band_lo_{m}'].map(usd) + ' – ' + hist[f'band_hi_{m}'].map(usd),
-                              'In band': hist[f'in_band_{m}'].map({1: 'yes', 0: 'no'})} if f'in_band_{m}' in hist.columns else {})})
-        st.dataframe(h.sort_values('For', ascending=False), width='stretch', hide_index=True, height=440,
-                     column_config={'Predicted ($)': st.column_config.NumberColumn(format="$%.2f"),
-                                    'Actual ($)': st.column_config.NumberColumn(format="$%.2f"),
-                                    'Error ($)': st.column_config.NumberColumn(format="%+.2f"),
-                                    'Error (%)': st.column_config.NumberColumn(format="%+.2f%%"),
-                                    'Random walk error (%)': st.column_config.NumberColumn(format="%+.2f%%")})
-        st.download_button("Download test-set history (CSV)", h.to_csv(index=False).encode(), file_name=f"{asset.lower()}_combined_test_history.csv")
-        st.caption(f"Every row is an out-of-sample prediction: the models were trained on data up to {VAL_END} and each prediction used "
-                   "only data up to the 'Predicted on' date. The random-walk error is the error of predicting \"tomorrow = today\".")
-
-# ═══════════════════════════════════════════════ 4. MODEL PERFORMANCE
+# ═══════════════════════════════════════════════ 3. MODEL PERFORMANCE
 with tab_perf:
     if cv_all is None or te_all is None or not tm:
         st.warning("Run `make evaluate` to generate results.")
@@ -521,7 +559,9 @@ with tab_perf:
         fc.update_yaxes(range=[40, 65], row=1, col=2)
         fc.update_layout(hovermode="closest")
         st.plotly_chart(layout(fc, 340, legend=False), use_container_width=True)
-        st.caption("The bar marked with an asterisk is the served combined forecast. The RMSE axis is zoomed: all models lie within ±1% of the random walk.")
+        spread = float((tt['RMSE_ret'] / float(naive_r['RMSE_ret']) - 1).abs().max() * 100)
+        st.caption(f"The bar marked with an asterisk is the served combined forecast. The RMSE axis is zoomed: every model lies within "
+                   f"±{spread:.1f}% of the random walk.")
 
         st.subheader("Walk-forward validation — the model-selection evidence")
         c = cv_all[cv_all['asset'] == asset].sort_values('RMSE_ret_mean')
@@ -531,9 +571,27 @@ with tab_perf:
                               'Direction correct': np.where(c['model'] == 'Naive', '—', c['DirAcc_pct_mean'].map(lambda v: pct(v))),
                               'RMSE ($)': c['RMSE_usd_mean'].map(usd)})
         st.dataframe(showc, width='stretch', hide_index=True)
+        cv_spread = float((c['RMSE_ret_mean'] / float(c.loc[c['model'] == 'Naive', 'RMSE_ret_mean'].iloc[0]) - 1).abs().max() * 100)
         st.caption("Four expanding-window folds inside the train+validation period (the test set is never used here). The Combined row averages the "
-                   "members' out-of-fold predictions. All models lie within ~0.5% of each other and of the random walk, so the ranking is not "
+                   f"members' out-of-fold predictions. Every model lies within ±{cv_spread:.2f}% of the random walk, so the ranking is not "
                    "statistically decisive — which is why the served forecast is the plain equal-weight combination rather than a single 'winner'.")
+
+        pw_all = load_csv('walkforward_pooled.csv')
+        if pw_all is not None and len(pw_all[pw_all['asset'] == asset]):
+            pw = pw_all[pw_all['asset'] == asset].sort_values('RMSE_ret')
+            p0 = pw.iloc[0]
+            st.subheader(f"Long-run evidence — {int(p0['n_days']):,} walk-forward predictions ({p0['first_day']} → {p0['last_day']})")
+            st.dataframe(pd.DataFrame({
+                'Model': pw['model'].map(label),
+                'RMSE vs random walk': pw['RMSE_vs_naive_pct'].map(lambda v: f"{v:+.3f}%"),
+                'DM p vs random walk': pw['DM_pvalue'].map(lambda v: f"{v:.3f}"),
+                'DM p vs drift': pw['DM_pvalue_vs_drift'].map(lambda v: '—' if pd.isna(v) else f"{v:.3f}"),
+                'Direction correct': pw['DirAcc_pct'].map(lambda v: pct(v)) + ' (p ' + pw['DirAcc_pvalue'].map(lambda v: f"{v:.3f}") + ')',
+                'Says UP on': pw['UpCalls_pct'].map(lambda v: pct(v, 0))}), width='stretch', hide_index=True)
+            st.caption(f"Every out-of-fold prediction of the four walk-forward folds pooled into one record ({p0['UpDays_pct']:.0f}% up days) — about ten "
+                       "times more days than the test window, so small real effects would show up here. 'Drift' (Naive-Mean) always predicts the training "
+                       "mean return, i.e. 'always UP' for an asset that rose: a direction hit-rate must beat the drift forecast's, not 50%, to show timing skill. "
+                       "Hyper-parameters were tuned on these folds, so if anything this favours the models.")
 
         # predicted vs actual in return space for the combined forecast
         if hist is not None and f'pred_return_{COMBINED}' in hist.columns:
@@ -564,6 +622,7 @@ with tab_perf:
             fi_models = [m_ for m_ in ('CatBoost', 'LightGBM', 'RandomForest', 'Ridge') if len(fi[(fi['asset'] == asset) & (fi['model'] == m_)])]
             if fi_models:
                 pick_m = st.selectbox("Which inputs does a member model rely on?", fi_models, index=0,
+                                      on_change=lambda: st.session_state.update(open_tab="Model Performance"),
                                       help="GRU / LSTM do not expose feature importance; the combined forecast averages all six.")
                 f_sel = fi[(fi['asset'] == asset) & (fi['model'] == pick_m)].sort_values('importance', ascending=False)
                 top = f_sel.head(15).iloc[::-1]
@@ -573,16 +632,22 @@ with tab_perf:
 
         bc = load_csv('band_calibration.csv')
         if bc is not None and len(bc[bc['asset'] == asset]):
-            st.subheader("Uncertainty band — is the ±1σ band honest?")
+            st.subheader("Uncertainty band — is the 68% band honest?")
             b = bc[bc['asset'] == asset]
-            st.dataframe(pd.DataFrame({'Split': b['split'], 'Band': b['band'].map({'conditional': 'conditional (served): σ = EWMA vol at day t', 'fixed': 'fixed width (return std before the split)'}),
-                                       'Days': b['n'], 'Actual inside band': b['coverage_pct'].map(lambda v: f"{v:.1f}%"),
-                                       'QLIKE (lower = better)': b['qlike'].map(lambda v: f"{v:.3f}"), 'Mean σ': b['mean_sigma_pct'].map(lambda v: f"{v:.2f}%")}),
+            k_ = float(b['k'].iloc[0]) if 'k' in b.columns else float('nan')
+            names = {'conditional': f'served: ±{k_:.2f}·σ_t (σ_t = EWMA vol at day t)', 'conditional_1sigma': 'previous: ±1·σ_t (uncalibrated)',
+                     'fixed': 'fixed width (same calibration, no volatility)'}
+            st.dataframe(pd.DataFrame({'Split': b['split'], 'Band': b['band'].map(lambda v: names.get(v, v)),
+                                       'Days': b['n'], 'Actual inside band (nominal 68%)': b['coverage_pct'].map(lambda v: f"{v:.1f}%"),
+                                       'Mean half-width': b['mean_sigma_pct'].map(lambda v: f"{v:.2f}%")}),
                          width='stretch', hide_index=True)
-            st.caption("A ±1σ band should contain the actual close on ≈68% of days. The served band uses only the volatility known on the day of the "
-                       "forecast, so it widens in turbulent markets and narrows in calm ones; the fixed-width alternative is shown for comparison. "
-                       "This is the one part of the forecast where the data has demonstrable skill: the size of tomorrow's move is far more "
-                       "predictable than its direction.")
+            one_sig = b.loc[(b['band'] == 'conditional_1sigma') & (b['split'] == 'test'), 'coverage_pct']
+            one_sig_txt = f" a plain ±1σ band covered {float(one_sig.iloc[0]):.1f}% of test days, too many." if len(one_sig) else ""
+            st.caption(f"A 68% band should contain the actual close on ≈68% of days. The multiplier k = {k_:.2f} and the fixed width were calibrated on the "
+                       "walk-forward errors of the training period only, so the validation and test rows are out-of-sample. Daily returns are fat-tailed:"
+                       f"{one_sig_txt} The served band uses only the volatility known on the day of the forecast, so it "
+                       "widens in turbulent markets and narrows in calm ones. This is the one part of the forecast where the data has demonstrable skill: "
+                       "the size of tomorrow's move is far more predictable than its direction.")
 
         reg = load_csv('regime_analysis.csv')
         if reg is not None:
@@ -609,9 +674,13 @@ with tab_perf:
                 if os.path.exists(p):
                     st.image(p, width='stretch')
 
-# ═══════════════════════════════════════════════ 5. METHODOLOGY
+# ═══════════════════════════════════════════════ 4. METHODOLOGY
 with tab_meth:
     st.subheader("Methodology")
+    band_m = (status.get('band') or {})
+    band_k_txt = f"{band_m['k']:.2f} for {asset}" if band_m.get('k') else "calibrated by the evaluation script"
+    cov1 = band_m.get('test_conditional_1sigma_coverage_pct')
+    cov1_txt = f"a plain ±1σ band covered {cov1:.1f} % of {asset}'s test days" if cov1 is not None else "a plain ±1σ band over-covers"
     close_rule = ("Gold and Silver close at the 13:30 ET COMEX settlement, before the US equity, rates and FX closes, so their macro returns and the "
                   "High/Low-based features (hl_range, ATR/price, ADX) are the *previous* session's values — only information known when the price is fixed is used."
                   if asset != 'Bitcoin' else
@@ -638,13 +707,15 @@ ensemble experiment, all scored on identical days. Models with a stopping rule (
 (no weights are fitted, so nothing is selected on the test set), and the combination is evaluated exactly like every single model — on the walk-forward
 folds and once on the unseen test set (row *Combined*). The best single model by validation ({cv_best}) is reported for comparison.
 
-**Uncertainty band.** Every forecast is shown with `P_t · exp(ŷ_t ± σ_t)`, where `σ_t` is the RiskMetrics EWMA volatility (λ = 0.94) of the returns up to day *t* —
-one of the model's own inputs, so it uses no future information. A fixed-width band was mis-calibrated on validation (44–87 % coverage for a nominal 68 %);
-the conditional band's coverage and QLIKE are reported on validation and test (Model Performance tab, `results/band_calibration.csv`).
+**Uncertainty band.** Every forecast is shown with a 68 % band `P_t · exp(ŷ_t ± k·σ_t)`, where `σ_t` is the RiskMetrics EWMA volatility (λ = 0.94) of the returns
+up to day *t* — one of the model's own inputs, so it uses no future information — and `k` ({band_k_txt}) is the 68.27 % quantile of `|error| / σ_t` over the
+walk-forward errors of the training period. Daily returns are fat-tailed, so {cov1_txt} instead of 68 %.
+The band's coverage is reported on validation and test against the uncalibrated and a fixed-width band (Model Performance tab, `results/band_calibration.csv`).
 
 **Metrics.** MAE / RMSE / MAPE in USD (what a user sees); RMSE and R² of the return (what is actually predicted); directional accuracy on non-flat days with a
-binomial p-value against 50 %; Diebold–Mariano test of squared errors against the random walk; a long/flat strategy backtest with 10 bps cost;
-coverage and QLIKE of the ±1σ band.
+binomial p-value against 50 % (and the share of UP calls, to expose drift); Diebold–Mariano test of squared errors against the random walk; a long/flat strategy
+backtest with 10 bps cost; coverage of the 68 % band. The same tests are also run on all walk-forward out-of-fold days pooled together (≈ 6 years), which has far
+more statistical power than the single test window.
 """)
     st.markdown("**Served forecast — details**")
     fit = status.get('fit_info') or {}

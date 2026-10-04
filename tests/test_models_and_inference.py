@@ -99,21 +99,58 @@ def test_live_sync_survives_network_failure(monkeypatch):
 
 
 @pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'model_status.json')), reason="models not trained")
-def test_uncertainty_band_is_conditional_and_uses_only_day_t_volatility():
-    """The ±1σ band is P_t·exp(r̂ ± σ_t) with σ_t = the EWMA-volatility feature on the forecast day — no future rows."""
+def test_uncertainty_band_is_conditional_calibrated_and_uses_only_day_t_volatility():
+    """The 68 % band is P_t·exp(r̂ ± k·σ_t): σ_t = the EWMA-volatility feature on the forecast day (no future rows), k = the
+    multiplier calibrated by the evaluation script on training-split walk-forward errors (fat tails → k < 1)."""
     import src.inference.prediction as pr
+    from config import load_model_status
+    k = load_model_status()['Silver']['band']['k']
+    assert 0.5 < k < 1.0
     f = pr.load_features('Silver', live=False)
     days = f.loc['2026-03-01':].index[[3, 40]]                       # two unseen test days with different volatility
     sig = []
     for day in days:
         r = pr.predict_for_date('Silver', str(day.date()))
         s = f.loc[day, pr.BAND_SIGMA_FEATURE]
-        assert np.isclose(r['band_sigma_pct'], s * 100)
+        assert np.isclose(r['band_sigma_pct'], s * 100) and np.isclose(r['band_k'], k)
         lo, hi = r['uncertainty_band']
         rh = r['predicted_return_pct'] / 100
-        assert np.isclose(lo, r['current_price'] * np.exp(rh - s)) and np.isclose(hi, r['current_price'] * np.exp(rh + s))
+        assert np.isclose(lo, r['current_price'] * np.exp(rh - k * s)) and np.isclose(hi, r['current_price'] * np.exp(rh + k * s))
         assert r['in_band'] == (lo <= r['actual_price'] <= hi)
         sig.append(s)
     assert not np.isclose(sig[0], sig[1])                             # the band really is conditional (width changes day to day)
     r_live = pr.predict_next_day('Silver')
     assert r_live['uncertainty_band'][0] < r_live['predicted_price'] < r_live['uncertainty_band'][1] and r_live['band_rule']
+
+
+def test_missing_band_calibration_is_reported_clearly():
+    import src.inference.prediction as pr
+    with pytest.raises(FileNotFoundError):
+        pr._band_k({})                                               # stale model_status.json without band.k → explicit error
+
+
+@pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'model_status.json')), reason="models not trained")
+def test_prediction_does_not_depend_on_feature_file_column_order(monkeypatch):
+    """Columns are re-ordered to the scaler's training order, so a feature file written in another order gives the same forecast."""
+    import src.inference.prediction as pr
+    f = pr.load_features('Bitcoin', live=False)
+    day = str(f.index[-10].date())
+    r1 = pr.predict_for_date('Bitcoin', day)
+    g = f[f.columns[::-1]]
+    monkeypatch.setattr(pr, 'load_features', lambda asset, live=True: g)
+    r2 = pr.predict_for_date('Bitcoin', day)
+    assert np.isclose(r1['predicted_price'], r2['predicted_price'])
+
+
+@pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'model_status.json')), reason="models not trained")
+def test_live_track_record_is_recomputed_and_consistent():
+    """The Forecast tab's live scorecard: every model re-run on the last n days; Combined = mean of members; HIT counts match the day table."""
+    from src.inference.prediction import recent_track_record, combined_members, COMBINED
+    seen = []
+    t = recent_track_record('Gold', 20, progress=lambda m, s: seen.append(m))
+    assert seen == combined_members('Gold') and t['n_days'] == 20 and len(t['days']) == 20
+    rows = {r['model']: r for r in t['rows']}
+    assert set(rows) == set(combined_members('Gold')) | {COMBINED, 'Random walk'}
+    assert rows[COMBINED]['hits'] == int((t['days']['hit'] == True).sum())          # noqa: E712  (object column with None)
+    assert all(np.isfinite(r['mae_pct']) for r in t['rows'])
+    assert np.allclose(t['days']['predicted'], t['days']['close'] * np.exp(t['days']['predicted_pct'] / 100))

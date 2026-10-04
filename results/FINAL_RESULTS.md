@@ -39,15 +39,31 @@ Test period 2026-02-18 → 2026-09-12 (207 days, 49% of them up days). Served fo
 | GRU | 1,075.86 | 1,458.31 | 1.54 | 0.02089 | -0.010 | 46.9 (207, 0.83) | 16 | 0.35 | -14.0 | +14.5 |
 | ARIMA | 1,067.96 | 1,459.44 | 1.53 | 0.02091 | -0.012 | 46.9 (207, 0.83) | 72 | 0.35 | -9.0 | +14.5 |
 
-### Uncertainty band served with the Combined forecast (±1σ, nominal coverage 68.3 %)
+### Pooled walk-forward evidence (2328 out-of-fold days, 2019-10-04 → 2026-02-16, train+val only)
 
-| Split | Band | Days | Coverage % | QLIKE | Mean σ % |
-|---|---|---:|---:|---:|---:|
-| validation | **conditional** | 160 | 75.0 | 1.875 | 2.18 |
-| validation | fixed | 160 | 87.5 | 2.029 | 3.36 |
-| test | **conditional** | 207 | 73.9 | 1.767 | 2.21 |
-| test | fixed | 207 | 88.9 | 2.037 | 3.32 |
-conditional = σ_t is the EWMA volatility at day t (served); fixed = one width, the return std of the data before the split.
+| Model | RMSE vs naive | DM p vs naive | DM p vs drift | Dir. Acc % (p) | UP calls % | corr(r̂, r) |
+|---|---:|---:|---:|---:|---:|---:|
+| CatBoost | -0.091 % | 0.448 | 0.039 | 50.2 (0.426) | 68 | +0.038 |
+| LightGBM | -0.034 % | 0.862 | 0.363 | 51.2 (0.136) | 58 | +0.039 |
+| **Combined** | -0.018 % | 0.866 | 0.090 | 50.8 (0.234) | 67 | +0.018 |
+| RandomForest | -0.001 % | 0.996 | 0.523 | 50.0 (0.525) | 53 | +0.040 |
+| Ridge | +0.050 % | 0.682 | 0.490 | 49.4 (0.740) | 60 | +0.008 |
+| Naive-Mean | +0.134 % | 0.025 | — | 48.8 (0.881) | 75 | -0.064 |
+| GRU | +0.271 % | 0.037 | 0.136 | 49.4 (0.726) | 70 | -0.038 |
+| LSTM | +0.337 % | 0.004 | 0.013 | 48.8 (0.881) | 66 | -0.047 |
+50.6 % of these days were up days. Drift = Naive-Mean (the training-window mean return, i.e. 'always UP' for an asset that rose); a directional hit-rate must beat the drift forecast's, not 50 %, to show timing skill. Hyper-parameters were tuned on these folds, so the comparison is, if anything, biased in favour of the models.
+
+### 68 % uncertainty band served with the Combined forecast (P_t·exp(r̂ ± k·σ_t), k = 0.825)
+
+| Split | Band | Days | Coverage % (nominal 68.3) | Mean half-width % |
+|---|---|---:|---:|---:|
+| validation | **conditional** | 160 | 60.6 | 1.80 |
+| validation | conditional_1sigma | 160 | 75.0 | 2.18 |
+| validation | fixed | 160 | 79.4 | 2.38 |
+| test | **conditional** | 207 | 65.7 | 1.82 |
+| test | conditional_1sigma | 207 | 73.9 | 2.21 |
+| test | fixed | 207 | 79.2 | 2.38 |
+conditional = k·σ_t with σ_t the EWMA volatility at day t (served); conditional_1sigma = the previous uncalibrated ±1σ_t band; fixed = one constant half-width. k and the fixed width are calibrated on the walk-forward errors of the training split only, so the validation and test rows are out-of-sample.
 
 ## Gold
 
@@ -84,15 +100,31 @@ Test period 2026-02-18 → 2026-09-11 (143 days, 50% of them up days). Served fo
 | LSTM | 58.82 | 76.58 | 1.31 | 0.01687 | -0.022 | 49.7 (143, 0.57) | 100 | 0.28 | -10.7 | -10.6 |
 | Stacked | 58.95 | 77.28 | 1.31 | 0.01705 | -0.043 | 51.0 (143, 0.43) | 97 | 0.44 | -7.9 | -10.6 |
 
-### Uncertainty band served with the Combined forecast (±1σ, nominal coverage 68.3 %)
+### Pooled walk-forward evidence (1584 out-of-fold days, 2019-10-29 → 2026-02-13, train+val only)
 
-| Split | Band | Days | Coverage % | QLIKE | Mean σ % |
-|---|---|---:|---:|---:|---:|
-| validation | **conditional** | 109 | 72.5 | 2.039 | 1.57 |
-| validation | fixed | 109 | 53.2 | 3.833 | 0.98 |
-| test | **conditional** | 143 | 75.5 | 1.392 | 1.84 |
-| test | fixed | 143 | 51.0 | 1.929 | 1.06 |
-conditional = σ_t is the EWMA volatility at day t (served); fixed = one width, the return std of the data before the split.
+| Model | RMSE vs naive | DM p vs naive | DM p vs drift | Dir. Acc % (p) | UP calls % | corr(r̂, r) |
+|---|---:|---:|---:|---:|---:|---:|
+| CatBoost | -0.436 % | 0.283 | 0.488 | 54.8 (0.000) | 87 | +0.079 |
+| **Combined** | -0.213 % | 0.085 | 0.570 | 52.5 (0.023) | 74 | +0.048 |
+| Ridge | -0.208 % | 0.050 | 0.410 | 54.8 (0.000) | 90 | +0.033 |
+| LightGBM | -0.147 % | 0.061 | 0.900 | 55.8 (0.000) | 100 | -0.002 |
+| Naive-Mean | -0.142 % | 0.070 | — | 55.8 (0.000) | 100 | -0.017 |
+| GRU | -0.068 % | 0.622 | 0.545 | 51.1 (0.203) | 51 | +0.035 |
+| RandomForest | +0.072 % | 0.757 | 0.344 | 51.9 (0.069) | 70 | +0.013 |
+| LSTM | +0.090 % | 0.541 | 0.153 | 47.0 (0.993) | 28 | +0.018 |
+55.6 % of these days were up days. Drift = Naive-Mean (the training-window mean return, i.e. 'always UP' for an asset that rose); a directional hit-rate must beat the drift forecast's, not 50 %, to show timing skill. Hyper-parameters were tuned on these folds, so the comparison is, if anything, biased in favour of the models.
+
+### 68 % uncertainty band served with the Combined forecast (P_t·exp(r̂ ± k·σ_t), k = 0.909)
+
+| Split | Band | Days | Coverage % (nominal 68.3) | Mean half-width % |
+|---|---|---:|---:|---:|
+| validation | **conditional** | 109 | 66.1 | 1.43 |
+| validation | conditional_1sigma | 109 | 72.5 | 1.57 |
+| validation | fixed | 109 | 47.7 | 0.83 |
+| test | **conditional** | 143 | 69.2 | 1.68 |
+| test | conditional_1sigma | 143 | 75.5 | 1.84 |
+| test | fixed | 143 | 42.0 | 0.83 |
+conditional = k·σ_t with σ_t the EWMA volatility at day t (served); conditional_1sigma = the previous uncalibrated ±1σ_t band; fixed = one constant half-width. k and the fixed width are calibrated on the walk-forward errors of the training split only, so the validation and test rows are out-of-sample.
 
 ## Silver
 
@@ -129,12 +161,28 @@ Test period 2026-02-18 → 2026-09-11 (143 days, 52% of them up days). Served fo
 | LSTM | 1.80 | 2.38 | 2.49 | 0.03198 | -0.006 | 51.7 (143, 0.37) | 100 | 0.63 | -12.2 | -12.1 |
 | ARIMA | 1.81 | 2.37 | 2.52 | 0.03226 | -0.024 | 52.4 (143, 0.31) | 55 | 0.50 | -3.2 | -12.1 |
 
-### Uncertainty band served with the Combined forecast (±1σ, nominal coverage 68.3 %)
+### Pooled walk-forward evidence (1584 out-of-fold days, 2019-10-29 → 2026-02-13, train+val only)
 
-| Split | Band | Days | Coverage % | QLIKE | Mean σ % |
-|---|---|---:|---:|---:|---:|
-| validation | **conditional** | 109 | 57.8 | 1.936 | 3.70 |
-| validation | fixed | 109 | 45.0 | 7.403 | 1.92 |
-| test | **conditional** | 143 | 75.5 | 1.588 | 3.99 |
-| test | fixed | 143 | 54.5 | 1.806 | 2.27 |
-conditional = σ_t is the EWMA volatility at day t (served); fixed = one width, the return std of the data before the split.
+| Model | RMSE vs naive | DM p vs naive | DM p vs drift | Dir. Acc % (p) | UP calls % | corr(r̂, r) |
+|---|---:|---:|---:|---:|---:|---:|
+| GRU | -0.166 % | 0.423 | 0.459 | 52.3 (0.033) | 75 | +0.047 |
+| LightGBM | -0.072 % | 0.416 | 0.547 | 53.3 (0.005) | 83 | +0.025 |
+| **Combined** | -0.058 % | 0.691 | 0.805 | 52.7 (0.016) | 78 | +0.018 |
+| CatBoost | -0.031 % | 0.612 | 0.901 | 53.5 (0.003) | 94 | -0.006 |
+| Naive-Mean | -0.027 % | 0.507 | — | 53.5 (0.003) | 100 | -0.025 |
+| Ridge | +0.053 % | 0.737 | 0.564 | 53.3 (0.005) | 78 | -0.027 |
+| LSTM | +0.057 % | 0.798 | 0.680 | 51.2 (0.176) | 60 | -0.008 |
+| RandomForest | +0.124 % | 0.649 | 0.564 | 51.1 (0.203) | 57 | +0.013 |
+53.4 % of these days were up days. Drift = Naive-Mean (the training-window mean return, i.e. 'always UP' for an asset that rose); a directional hit-rate must beat the drift forecast's, not 50 %, to show timing skill. Hyper-parameters were tuned on these folds, so the comparison is, if anything, biased in favour of the models.
+
+### 68 % uncertainty band served with the Combined forecast (P_t·exp(r̂ ± k·σ_t), k = 0.870)
+
+| Split | Band | Days | Coverage % (nominal 68.3) | Mean half-width % |
+|---|---|---:|---:|---:|
+| validation | **conditional** | 109 | 54.1 | 3.22 |
+| validation | conditional_1sigma | 109 | 57.8 | 3.70 |
+| validation | fixed | 109 | 42.2 | 1.64 |
+| test | **conditional** | 143 | 69.2 | 3.47 |
+| test | conditional_1sigma | 143 | 75.5 | 3.99 |
+| test | fixed | 143 | 44.8 | 1.64 |
+conditional = k·σ_t with σ_t the EWMA volatility at day t (served); conditional_1sigma = the previous uncalibrated ±1σ_t band; fixed = one constant half-width. k and the fixed width are calibrated on the walk-forward errors of the training split only, so the validation and test rows are out-of-sample.
