@@ -32,6 +32,7 @@ from src.inference.prediction import (predict_next_day, predict_for_date, predic
                                       recent_track_record,
                                       COMBINED, DISCLAIMER)
 from src.data.market_calendar import expected_last_complete_bar
+from src.models.registry import ROLLING_BASELINES
 from src.data.sync_live_data import update_live_data
 
 logger = logging.getLogger(__name__)
@@ -163,7 +164,8 @@ if st.sidebar.button("Sync live market data", width='stretch',
     if ok:
         st.cache_data.clear(); st.sidebar.success("Live data synced.")
     else:
-        st.sidebar.warning("Yahoo Finance did not return data (rate limit). Using the stored dataset.")
+        st.sidebar.warning("Yahoo Finance did not return every series (rate limit or outage), so nothing was replaced: the previous "
+                           "download (or the stored dataset) stays in use. Try again in a minute.")
 
 # Keep the live data current without a button press: when a newer daily bar should exist, download it. Checked at most
 # once every 30 minutes per asset (and never more often while Yahoo has not yet published the bar).
@@ -408,14 +410,14 @@ with tab_fc:
                                                      dict(label="All", step="all")],
                                             bgcolor="#262C38", activecolor="#3A4252", font=dict(color="white")), row=1, col=1)
         st.plotly_chart(layout(fig, 460 if n_rows == 1 else 460 + (n_rows - 1) * 110), use_container_width=True)
-        st.caption(f"Shading: green = training (≤ {TRAIN_END}) · amber = validation (≤ {VAL_END}) · red = unseen test (evaluated once). "
+        st.caption(f"Shading: green = training (≤ {TRAIN_END}) · amber = validation (≤ {VAL_END}) · red = unseen test (held out from training, tuning and model selection). "
                    "Overlays are the indicator families the model's features are built from; the model receives them as scale-free ratios.")
 
 # ═══════════════════════════════════════════════ 2. PREDICT A DAY (unseen test period)
 with tab_demo:
     st.subheader("Predict a day the models have never seen")
-    st.markdown(f"Stand on any day after **{VAL_END}** — a period never used for training, validation or model selection. "
-                f"All models see data **only up to that day**, their combined forecast for the next trading day is shown, and the actual close is then revealed. "
+    st.markdown(f"Stand on any day from **{VAL_END}** on — every day it predicts lies after the models' training and validation data, "
+                f"and no model was trained or tuned on it. All models see data **only up to that day**, their combined forecast for the next trading day is shown, and the actual close is then revealed. "
                 f"The list grows by itself: every new daily close published by Yahoo Finance adds a new day (marked **NEW**).")
     if hist is None or df is None:
         st.warning("Run `make evaluate` first to generate the unseen-test predictions.")
@@ -488,15 +490,21 @@ with tab_demo:
                                f"known on {r['as_of_date']}) — the actual close fell **{'inside' if r['in_band'] else 'outside'}** it.")
                 else:
                     m3.metric("Actual close", "not yet known")
-                st.caption(f"Forecast: **combined** of {len(r['individual'])} models · horizon {r['horizon_days']} trading day · "
-                           f"{'inside the unseen test period' if r['in_unseen_test_period'] else 'inside the training/validation period'} · "
-                           "the prediction uses only data up to the chosen day (frozen dataset).")
+                period_txt = ('after the stored test period (newer live data, never scored before)' if r.get('after_stored_test') else
+                              'inside the stored unseen test period' if r['in_unseen_test_period'] else 'inside the training/validation period')
+                st.caption(f"Forecast: **combined** of {len(r['individual'])} models · horizon {r['horizon_days']} trading day · {period_txt} · "
+                           f"the prediction uses only data up to the chosen day ({r['data_source']}).")
 
                 col_pred = f'pred_close_{COMBINED}'
                 if col_pred in hist.columns:
                     fd = go.Figure()
                     fd.add_trace(go.Scatter(x=hist['target_date'], y=hist['actual_close'], mode='lines', name='actual close',
                                             line=dict(color=COLOR[asset], width=2)))
+                    after = df[df['timestamp'] > hist['target_date'].max()] if r.get('after_stored_test') else df.iloc[:0]
+                    if len(after):                                       # newer live closes, so a NEW day's markers are not left floating
+                        fd.add_trace(go.Scatter(x=pd.concat([hist['target_date'].tail(1), after['timestamp']]),
+                                                y=pd.concat([hist['actual_close'].tail(1), after['price']]), mode='lines',
+                                                name='actual close (newer live data)', line=dict(color=COLOR[asset], width=2, dash='dot')))
                     fd.add_trace(go.Scatter(x=hist['target_date'], y=hist[col_pred], mode='lines', name='combined predicted close',
                                             line=dict(color=ACCENT, width=1.4, dash='dash')))
                     if f'band_lo_{COMBINED}' in hist.columns:
@@ -510,7 +518,8 @@ with tab_demo:
                                                 marker=dict(color=COLOR[asset], size=13, symbol='circle', line=dict(color='white', width=1))))
                     fd.update_yaxes(tickprefix="$")
                     st.plotly_chart(layout(fd, 400, f"Unseen test period {hist['target_date'].min().date()} → {hist['target_date'].max().date()}: "
-                                                    f"actual vs predicted close"), use_container_width=True)
+                                                    f"actual vs predicted close" + (" (+ newer live closes)" if len(after) else "")),
+                                    use_container_width=True)
                     st.caption("A predicted-price line always hugs the actual line because it starts from today's close. "
                                "Whether the models have skill is only visible in return space — see Model Performance.")
 
@@ -533,13 +542,15 @@ with tab_perf:
         st.warning("Run `make evaluate` to generate results.")
     else:
         s = status
-        st.subheader("Unseen test set — evaluated once")
+        st.subheader("Unseen test set — held out from training, tuning and model selection")
         st.caption(f"Test period {s['test_period'][0]} → {s['test_period'][1]} ({tm['n_test']} days). The served forecast is the **Combined** row "
                    f"(equal-weight mean of the six trained models — no fitted weights, so nothing was chosen on the test set). "
                    f"The best single model by walk-forward validation is **{cv_best}**.")
         t = te_all[te_all['asset'] == asset].sort_values('RMSE_ret')
         is_naive = (t['model'] == 'Naive').values
-        label = lambda m_: f"{m_} (served)" if m_ == COMBINED else (f"{m_} (best single by CV)" if m_ == cv_best else m_)
+        BASE_LBL = {'Naive': 'Naive — random walk (tomorrow = today)', 'Naive-Mean': 'Naive-Mean — drift (training-mean return)',
+                    'ARIMA': 'ARIMA (baseline)', 'MA-5': 'MA-5 — 5-day average price (baseline)', 'Mean-20d': 'Mean-20d — 20-day mean return (baseline)'}
+        label = lambda m_: (f"{m_} (served)" if m_ == COMBINED else (f"{m_} (best single by CV)" if m_ == cv_best else BASE_LBL.get(m_, m_)))
         show = pd.DataFrame({
             'Model': t['model'].map(label),
             'MAE ($)': t['MAE_usd'].map(usd), 'RMSE ($)': t['RMSE_usd'].map(usd), 'MAPE': t['MAPE_usd'].map(lambda v: pct(v, 2)),
@@ -569,7 +580,8 @@ with tab_perf:
                 "R² on price levels is intentionally not shown — a random walk scores ≈ 0.95 there.")
 
         # comparison chart: every model vs the random walk
-        tt = t.copy(); tt['label'] = tt['model'].map(lambda m_: f"{m_}*" if m_ == COMBINED else m_)
+        tt = t[~t['model'].isin(ROLLING_BASELINES)].copy()      # the moving-average baselines are far off the zoomed scale (see caption)
+        tt['label'] = tt['model'].map(lambda m_: f"{m_}*" if m_ == COMBINED else m_)
         fc = make_subplots(rows=1, cols=2, subplot_titles=("RMSE of the next-day return (lower is better)", "Direction correct, % (higher is better)"),
                            horizontal_spacing=0.08)
         colors = [NAIVE if m_ == 'Naive' else (ACCENT if m_ == COMBINED else '#4E7FA8') for m_ in tt['model']]
@@ -586,8 +598,34 @@ with tab_perf:
         fc.update_layout(hovermode="closest")
         st.plotly_chart(layout(fc, 340, legend=False), use_container_width=True)
         spread = float((tt['RMSE_ret'] / float(naive_r['RMSE_ret']) - 1).abs().max() * 100)
-        st.caption(f"The bar marked with an asterisk is the served combined forecast. The RMSE axis is zoomed: every model lies within "
-                   f"±{spread:.1f}% of the random walk.")
+        ma = t[t['model'].isin(ROLLING_BASELINES)]
+        ma_txt = ('' if ma.empty else ' Not drawn: the moving-average baselines, ' + ', '.join(
+            f"{m_} {(v / float(naive_r['RMSE_ret']) - 1) * 100:+.0f}%" for m_, v in zip(ma['model'], ma['RMSE_ret'])) +
+            " RMSE vs the random walk — a moving average lags the price, so it is a much weaker benchmark than \"tomorrow = today\".")
+        st.caption(f"The bar marked with an asterisk is the served combined forecast. The RMSE axis is zoomed: every model and the random walk, drift "
+                   f"and ARIMA baselines lie within ±{spread:.1f}% of the random walk.{ma_txt}")
+
+        if te_all is not None:
+            st.subheader("All three assets — the served forecast against every baseline (unseen test set)")
+            rows_x = []
+            for a_ in ASSETS:
+                ta = te_all[te_all['asset'] == a_].set_index('model')
+                if COMBINED not in ta.index or 'Naive' not in ta.index:
+                    continue
+                rw_ = float(ta.loc['Naive', 'RMSE_ret'])
+                rel_ = lambda m_: f"{(float(ta.loc[m_, 'RMSE_ret']) / rw_ - 1) * 100:+.2f}%" if m_ in ta.index else '—'
+                cvb = status_all.get(a_, {}).get('primary_model')
+                rows_x.append({'Asset': a_, 'Test days': int(ta.loc[COMBINED, 'n_test']), 'Random walk RMSE (return)': f"{rw_:.5f}",
+                               'Combined (served)': rel_(COMBINED), 'Best single model by CV': f"{cvb}: {rel_(cvb)}" if cvb else '—',
+                               'Drift': rel_('Naive-Mean'), 'ARIMA': rel_('ARIMA'),
+                               **{b: rel_(b) for b in ROLLING_BASELINES},
+                               'Combined DM p': f"{float(ta.loc[COMBINED, 'DM_pvalue']):.2f}",
+                               'Combined direction (UP calls)': f"{float(ta.loc[COMBINED, 'DirAcc_pct']):.1f}% ({float(ta.loc[COMBINED, 'UpCalls_pct']):.0f}%)"})
+            if rows_x:
+                st.dataframe(pd.DataFrame(rows_x), width='stretch', hide_index=True)
+                st.caption("Each cell is that forecast's RMSE of the next-day return relative to the random walk on the same unseen days (negative = "
+                           "smaller error). Every forecast is scored on exactly the same days. None of the learned forecasts is significantly better than "
+                           "the random walk (DM p ≥ 0.05), while the simple moving-average rules are far worse — persistence is the benchmark that matters.")
 
         st.subheader("Walk-forward validation — the model-selection evidence")
         c = cv_all[cv_all['asset'] == asset].sort_values('RMSE_ret_mean')
@@ -597,9 +635,11 @@ with tab_perf:
                               'Direction correct': np.where(c['model'] == 'Naive', '—', c['DirAcc_pct_mean'].map(lambda v: pct(v))),
                               'RMSE ($)': c['RMSE_usd_mean'].map(usd)})
         st.dataframe(showc, width='stretch', hide_index=True)
-        cv_spread = float((c['RMSE_ret_mean'] / float(c.loc[c['model'] == 'Naive', 'RMSE_ret_mean'].iloc[0]) - 1).abs().max() * 100)
+        cl = c[~c['model'].isin(ROLLING_BASELINES)]
+        cv_spread = float((cl['RMSE_ret_mean'] / float(c.loc[c['model'] == 'Naive', 'RMSE_ret_mean'].iloc[0]) - 1).abs().max() * 100)
         st.caption("Four expanding-window folds inside the train+validation period (the test set is never used here). The Combined row averages the "
-                   f"members' out-of-fold predictions. Every model lies within ±{cv_spread:.2f}% of the random walk, so the ranking is not "
+                   f"members' out-of-fold predictions. Every model lies within ±{cv_spread:.2f}% of the random walk"
+                   f"{' (the moving-average baselines excepted, which are far worse)' if len(cl) < len(c) else ''}, so the ranking is not "
                    "statistically decisive — which is why the served forecast is the plain equal-weight combination rather than a single 'winner'.")
 
         pw_all = load_csv('walkforward_pooled.csv')
@@ -617,7 +657,8 @@ with tab_perf:
             st.caption(f"Every out-of-fold prediction of the four walk-forward folds pooled into one record ({p0['UpDays_pct']:.0f}% up days) — about ten "
                        "times more days than the test window, so small real effects would show up here. 'Drift' (Naive-Mean) always predicts the training "
                        "mean return, i.e. 'always UP' for an asset that rose: a direction hit-rate must beat the drift forecast's, not 50%, to show timing skill. "
-                       "Hyper-parameters were tuned on these folds, so if anything this favours the models.")
+                       "Hyper-parameters were tuned on these folds, so if anything this favours the models. This table holds about 30 direction tests "
+                       "across the three assets, so one or two p-values below 0.05 are expected by chance alone (Bonferroni threshold ≈ 0.002).")
 
         # predicted vs actual in return space for the combined forecast
         if hist is not None and f'pred_return_{COMBINED}' in hist.columns:
@@ -685,11 +726,13 @@ with tab_perf:
                                            'Direction correct (combined)': rg['dir_hit_served_pct'].map(lambda v: pct(v))}),
                              width='stretch', hide_index=True)
                 st.caption("Regimes are defined on the day the prediction is made (30-day volatility tercile; sign of the 20-day return), so they never use future information.")
-        with st.expander("Design experiments (validation only): data size, feature ablation, horizon, volatility target"):
+        with st.expander("Design experiments (validation only, test set never read): data size, features, horizon, volatility, ensembles, losses"):
             for fname, title in (('E1_data_size.csv', 'E1 — training-data size (fixed validation window)'),
                                  ('E2_feature_ablation.csv', 'E2 — feature-group ablation (walk-forward CV)'),
                                  ('E3_horizon.csv', 'E3 — next-day vs 5-day return target'),
-                                 ('E4_volatility.csv', 'E4 — 22-day realised-volatility target')):
+                                 ('E4_volatility.csv', 'E4 — 22-day realised-volatility target'),
+                                 ('E5_audit_candidates.csv', 'E5 — ensemble membership, de-duplicated features, zero drift (pooled walk-forward)'),
+                                 ('E6_final_candidates.csv', 'E6 — volatility-scaled target and robust (Huber) loss (pooled walk-forward)')):
                 ex = load_csv(os.path.join('experiments', fname))
                 if ex is not None:
                     st.markdown(f"**{title}**")
@@ -715,17 +758,18 @@ with tab_meth:
 **Target.** The next trading day's log return `y_t = ln(P_(t+1) / P_t)`, converted to a price with `P̂_(t+1) = P_t · exp(ŷ_t)`.
 Predicting the return (not the price) makes the target stationary and makes the random-walk baseline (ŷ = 0) explicit.
 
-**Data.** Yahoo Finance daily data from {status.get('data_start', '2018')} ({status.get('n_train', '?')} training days, {status.get('n_val', '?')} validation days).
+**Data.** Yahoo Finance daily data from January 2018; the first training sample is {status.get('data_start', '2018')} (after the indicators' warm-up and the
+30-day input window) — {status.get('n_train', '?')} training days, {status.get('n_val', '?')} validation days.
 Only **complete** daily bars are used (the running bar of the current day is dropped at download time).
 **Split** — frozen, chronological, no shuffling: train ≤ {TRAIN_END} · validation ≤ {VAL_END} · unseen test = remainder.
-The scaler is fitted on train only; hyper-parameters are chosen by 4-fold expanding-window walk-forward validation inside train+val; the test set is evaluated once.
+The scaler is fitted on train only; hyper-parameters are chosen by 4-fold expanding-window walk-forward validation inside train+val; the test set is used only by the final evaluation script (never for training, tuning or fitting weights).
 
 **Features ({len(status.get('features', []))}).** Stationary and backward-looking: today's and lagged log returns, 20-day momentum, rolling / HAR / EWMA volatility,
 RSI, ADX, ROC, MACD/price, price/EMA ratios, Bollinger %B and width, ATR/price, high–low range, macro daily returns
-(S&P 500, VIX{', DXY, oil, 10-year yield' if asset != 'Bitcoin' else ', Fear & Greed, day-of-week, volume change'}){', gold return' if asset == 'Silver' else ''}.
+(S&P 500, VIX{', DXY, oil, 10-year yield' if asset != 'Bitcoin' else ''}){', the gold return' if asset == 'Silver' else ''}{' plus the crypto Fear & Greed index, day-of-week and volume change' if asset == 'Bitcoin' else ''}.
 Raw price levels are shown on charts but never fed to a model. **Close-time rule.** {close_rule}
 
-**Models.** Six trained models — Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM — plus baselines (random walk, historical mean, ARIMA) and a stacked
+**Models.** Six trained models — Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM — plus baselines (random walk, historical-mean drift, ARIMA, a 5-day moving-average price and a 20-day mean return) and a stacked
 ensemble experiment, all scored on identical days. Models with a stopping rule (trees / epochs) use validation for it in phase 1 and are refit on train+val in phase 2.
 
 **Served forecast — the combination.** *Run prediction* runs all six models on the same input window and averages their predicted log returns with

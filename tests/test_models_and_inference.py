@@ -98,6 +98,43 @@ def test_live_sync_survives_network_failure(monkeypatch):
     assert sl.update_live_data('Bitcoin', refresh_external=True) is False   # returns False, never raises
 
 
+@pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'btc_scaler.pkl')), reason="models not trained")
+def test_live_sync_is_all_or_nothing(monkeypatch, tmp_path):
+    """A partial download must not replace the live feature file: a failed series would either remove a model feature (every forecast
+    then fails with a feature mismatch) or leave an old file whose last value is silently repeated for the newest day (Silver's
+    same-day gold return). Each failure mode → False and nothing written; a complete download → written."""
+    import shutil
+    import src.data.sync_live_data as sl
+    from config import RAW_DATA_DIR
+    raw, out = tmp_path / 'raw_live', tmp_path / 'processed'
+    shutil.copytree(RAW_DATA_DIR, raw); out.mkdir()
+    monkeypatch.setattr(sl, 'RAW_LIVE_DIR', str(raw)); monkeypatch.setattr(sl, 'PROCESSED_DATA_DIR', str(out))
+    ok = pd.DataFrame({'timestamp': pd.to_datetime(['2026-09-11']), 'price': [1.0]})              # "download succeeded"
+    every_series = {s: ok for s in ('DXY', 'CrudeOil', 'VIX', 'TreasuryYields', 'SP500', 'FearGreed')}
+    monkeypatch.setattr(sl, 'fetch_asset', lambda *a, **k: ok)
+    # 1. a required series reports a failed download
+    monkeypatch.setattr(sl, 'fetch_all_external_data', lambda out_dir: {**every_series, 'FearGreed': pd.DataFrame()})
+    assert sl.update_live_data('Bitcoin') is False and not (out / 'btc_live_features.csv').exists()
+    # 2. downloads "succeed" but a model feature cannot be built (its file is missing)
+    monkeypatch.setattr(sl, 'fetch_all_external_data', lambda out_dir: every_series)
+    (raw / 'fear_greed_data.csv').unlink()
+    assert sl.missing_model_features('Bitcoin', ['log_return']) and not sl.missing_model_features('Gold', load_features_cols('Gold'))
+    assert sl.update_live_data('Bitcoin') is False and not (out / 'btc_live_features.csv').exists()
+    # 3. Silver: the gold download fails → the old gold file must not be used for today's gold_return
+    monkeypatch.setattr(sl, 'fetch_asset', lambda name, *a, **k: pd.DataFrame() if name == 'Gold' else ok)
+    assert sl.update_live_data('Silver') is False and not (out / 'silver_live_features.csv').exists()
+    # 4. complete download → written
+    shutil.copy(os.path.join(RAW_DATA_DIR, 'fear_greed_data.csv'), raw / 'fear_greed_data.csv')
+    monkeypatch.setattr(sl, 'fetch_asset', lambda *a, **k: ok)
+    assert sl.update_live_data('Bitcoin') is True and (out / 'btc_live_features.csv').exists()
+    assert sl.update_live_data('Silver') is True and (out / 'silver_live_features.csv').exists()
+
+
+def load_features_cols(asset):
+    from src.inference.prediction import load_features
+    return list(load_features(asset, live=False).columns)
+
+
 @pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'model_status.json')), reason="models not trained")
 def test_uncertainty_band_is_conditional_calibrated_and_uses_only_day_t_volatility():
     """The 68 % band is P_t·exp(r̂ ± k·σ_t): σ_t = the EWMA-volatility feature on the forecast day (no future rows), k = the

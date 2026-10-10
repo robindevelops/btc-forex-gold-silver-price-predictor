@@ -210,6 +210,8 @@ def predict_next_day(asset, model_name=COMBINED):
         'direction': 'UP' if r_hat > 0 else 'DOWN', 'n_features': len(cols),
         **_band(feats, as_of, last_close, r_hat, _band_k(status)), 'band_calibration': status.get('band'),
         'data_source': 'live download' if _features_path(asset).endswith('_live_features.csv') else 'stored dataset',
+        # False when a newer complete bar should already exist (sync the live data first): the forecast is then for an older day
+        'data_is_current': bool(as_of.date() >= expected_last_complete_bar(ASSET_CONFIG[asset]['type'])),
         'individual': _individual(members, last_close), **ctx,
     }
     logger.info(f"{asset}: {model_name} as of {as_of.date()} close ${last_close:,.2f} → ${pred_price:,.2f} ({r_hat*100:+.2f}%)")
@@ -354,4 +356,5 @@ if __name__ == '__main__':
             members = ', '.join(f"{m['model']} {m['predicted_return_pct']:+.2f}%" for m in r['individual'])
             print(f"{a:8s} {r['as_of_date']}  ${r['current_price']:,.2f} → ${r['predicted_price']:,.2f} "
                   f"({r['predicted_return_pct']:+.2f}% {r['direction']})  68% band ${r['uncertainty_band'][0]:,.2f}–${r['uncertainty_band'][1]:,.2f} "
-                  f"(±{r['band_halfwidth_pct']:.2f}% = {r['band_k']:.2f}·σ_t)  combined of [{members}]")
+                  f"(±{r['band_halfwidth_pct']:.2f}% = {r['band_k']:.2f}·σ_t)  combined of [{members}]"
+                  + ("" if r['data_is_current'] else "  [newer bar expected: sync live data first]"))

@@ -1,0 +1,1 @@
+{"params": {"iterations": 800, "learning_rate": 0.03, "depth": 7, "l2_leaf_reg": 3.0}, "fit_info": {"iterations_used": 50}}

@@ -17,6 +17,7 @@ Two-phase training for models that need a validation signal (epochs / iterations
 import os
 import json
 import numpy as np
+import pandas as pd
 import joblib
 
 from config import MODELS_DIR, get_prefix
@@ -30,8 +31,30 @@ def artefact_stem(asset_name, model_name, task='return_1d'):
 
 TABULAR = ('Ridge', 'RandomForest', 'LightGBM', 'CatBoost')
 RECURRENT = ('GRU', 'LSTM')
-BASELINES = ('Naive', 'Naive-Mean', 'ARIMA')
+ROLLING_BASELINES = ('MA-5', 'Mean-20d')     # fixed rules computed from the feature frame (no fitting): see rolling_baseline_forecast
+ROLLING_BASELINE_RULES = {'MA-5': 'moving-average price forecast: next close = mean of the last 5 closes',
+                          'Mean-20d': 'rolling mean of the last 20 daily log returns'}
+BASELINES = ('Naive', 'Naive-Mean', 'ARIMA') + ROLLING_BASELINES
 ALL_MODELS = BASELINES + TABULAR + RECURRENT
+
+
+def rolling_baseline_forecast(name, features, dates):
+    """
+    Real log-return forecast for day t+1 made from the rows up to day t (each `dates` entry is day t). No parameters are fitted.
+        MA-5      moving-average price forecast  P̂_{t+1} = mean(P_{t-4..t})     →  r̂ = ln(MA5_t / P_t)
+        Mean-20d  rolling mean of the last 20 daily log returns                  →  r̂ = return_20d_t / 20
+    Both are common "naive" forecasts; they are reported to show that the random walk (r̂ = 0) is the hard baseline.
+    """
+    if name == 'MA-5':
+        r = np.log(features['price'].rolling(5).mean() / features['price'])
+    elif name == 'Mean-20d':
+        r = features['return_20d'] / 20
+    else:
+        raise ValueError(f"Unknown rolling baseline '{name}'. Known: {ROLLING_BASELINES}")
+    out = r.reindex(pd.DatetimeIndex(dates)).values
+    if not np.all(np.isfinite(out)):
+        raise ValueError(f"{name}: missing history for some forecast days")
+    return out
 
 
 class BaseModel:

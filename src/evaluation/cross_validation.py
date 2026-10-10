@@ -18,7 +18,7 @@ import numpy as np
 from sklearn.model_selection import TimeSeriesSplit
 
 from config import CV_FOLDS
-from src.models.registry import make_model
+from src.models.registry import make_model, rolling_baseline_forecast, ROLLING_BASELINES
 from src.utils.metrics import evaluate_task
 
 
@@ -67,6 +67,9 @@ def cv_evaluate(model_name, params, data, n_splits=CV_FOLDS, inner_val_frac=0.15
             pred = data['fwd'](A['naive'][va])
         elif model_name == 'Naive-Mean':
             pred = np.full(len(va), float(y[tr].mean()))
+        elif model_name in ROLLING_BASELINES:
+            days = np.concatenate([data['dates_train'], data['dates_val']])[va]
+            pred = data['fwd'](rolling_baseline_forecast(model_name, data['features'], days))
         elif model_name == 'EWMA':
             pred = data['fwd'](np.log(data['features']['ewma_vol'].reindex(
                 np.concatenate([data['dates_train'], data['dates_val']])[va]).values.clip(1e-6)))

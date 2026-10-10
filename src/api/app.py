@@ -56,6 +56,7 @@ class PredictionResponse(BaseModel):
     band_rule: Optional[str] = None
     band_calibration: Optional[Dict[str, Any]] = None    # coverage / QLIKE of that band on validation and test
     data_source: Optional[str] = None
+    data_is_current: Optional[bool] = None              # False → a newer complete bar should exist: run the live sync (dashboard) first
     test_metrics: Dict[str, Any] = {}
     disclaimer: str
 

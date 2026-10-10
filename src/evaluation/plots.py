@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from config import ASSETS, RESULTS_DIR, FIGURES_DIR, PROCESSED_DATA_DIR, TRAIN_END, VAL_END, get_prefix, load_model_status
+from src.models.registry import ROLLING_BASELINES
 
 plt.rcParams.update({'figure.dpi': 130, 'savefig.dpi': 160, 'font.size': 10, 'axes.grid': True,
                      'grid.alpha': 0.3, 'axes.spines.top': False, 'axes.spines.right': False})
@@ -70,6 +71,7 @@ def comparison(kind):
         df = pd.read_csv(os.path.join(RESULTS_DIR, 'final_test_results.csv'))
         rmse_col, da_col, title, err_col = 'RMSE_ret', 'DirAcc_pct', 'Untouched test set', None
     fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    df = df[~df['model'].isin(ROLLING_BASELINES)]      # MA-5 / Mean-20d are 3–57 % worse than the random walk: off this zoomed scale
     for j, asset in enumerate(ASSETS):
         a = df[df['asset'] == asset].sort_values(rmse_col, ascending=False)
         colors = [MODEL_COLORS.get(m, '#607D8B') for m in a['model']]

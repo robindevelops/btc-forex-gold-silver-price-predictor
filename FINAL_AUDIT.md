@@ -1,5 +1,7 @@
 # FYP Phase 2 — Final Audit, Prediction Assessment and Viva Preparation
 
+> **Newer:** the submission audit of 2026-10-10 is in `FINAL_SUBMISSION_REPORT.md` (fresh-clone reproducibility, moving-average baselines, two live-data bugs fixed, E6). Every result below was re-produced on 2026-10-10 to ≤ 1e-15 and still holds; the test window it calls "touched once" was inspected across project iterations (README, Limitations).
+
 *AI-Powered Commodity Price Predictor (Bitcoin · Gold · Silver) — audit performed 2026-10-04 on commit `afafa9d` + the changes listed in §24.*
 *Every number below was read from the project's own result files or re-computed by its code during this audit. Nothing is estimated.*
 

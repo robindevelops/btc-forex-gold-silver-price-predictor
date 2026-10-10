@@ -20,13 +20,13 @@ __pycache__/
 .vscode/
 
 # Project specific
-data/raw/*
-!data/raw/.gitkeep
+# data/raw/ (the frozen 2018-01 → 2026-09-12 download behind every reported result, ~1 MB) and data/models/ (the trained models and
+# scalers, ~2 MB) ARE versioned, so a fresh clone reproduces the reported results exactly — Yahoo revises history and rolls futures
+# contracts, so a re-download would not. data/processed/ is rebuilt from data/raw by `make preprocess`; data/raw_live/ is the daily
+# live download.
 data/raw_live/
 data/processed/*
 !data/processed/.gitkeep
-data/models/*
-!data/models/.gitkeep
 
 # Testing and coverage
 .pytest_cache/
