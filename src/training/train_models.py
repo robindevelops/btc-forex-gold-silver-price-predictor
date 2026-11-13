@@ -7,8 +7,13 @@ Train the final models for every asset.
 For each (asset, model) two fits are made with the tuned hyper-parameters
 (results/tuning/best_params.json, falling back to config.DEFAULT_PARAMS):
 
-  Phase A  fit on TRAIN, monitor VAL      → honest validation metrics, train-vs-val
-                                             over-fitting gap, Keras loss curves
+  Phase A  fit on TRAIN, monitor VAL      → validation metrics, train-vs-val over-fitting gap, Keras loss curves.
+                                             CAVEAT: LightGBM, CatBoost, GRU and LSTM choose their stopping point
+                                             ON this validation set, so their phase-A validation scores are mildly
+                                             OPTIMISTIC (Ridge / RandomForest have no stopping rule and are unaffected).
+                                             Model selection does NOT use these numbers — it uses the walk-forward
+                                             folds (results/cv_results.csv) — and the unbiased out-of-sample evidence
+                                             is the walk-forward and test results.
   Phase B  refit on TRAIN+VAL             → the deployed model (data/models/*)
            (epoch / tree count fixed from phase A)
 

@@ -161,6 +161,7 @@ if st.sidebar.button("Sync live market data", width='stretch',
                      help="Downloads the latest prices from Yahoo Finance into data/raw_live/. The frozen evaluation data is never changed."):
     with st.spinner("Fetching latest data from Yahoo Finance…"):
         ok = update_live_data(asset, refresh_external=True)
+    st.session_state[f'sync_failed_{asset}'] = not ok
     if ok:
         st.cache_data.clear(); st.sidebar.success("Live data synced.")
     else:
@@ -175,7 +176,9 @@ _fresh = os.path.exists(_live_path) and (time.time() - os.path.getmtime(_live_pa
 if not (live_data_is_current(asset) or _fresh or time.time() - _checked < 30 * 60):
     st.session_state[f'live_check_{asset}'] = time.time()
     with st.spinner(f"Checking Yahoo Finance for new {asset} data…"):
-        if update_live_data(asset, refresh_external=True):
+        _ok = update_live_data(asset, refresh_external=True)
+        st.session_state[f'sync_failed_{asset}'] = not _ok     # False → offline / rate-limited (see the warning on the Forecast tab)
+        if _ok:
             st.cache_data.clear()
 
 df = load_features(asset)
@@ -245,6 +248,7 @@ with tab_fc:
                         fresh = os.path.exists(live_path) and (time.time() - os.path.getmtime(live_path)) < 30 * 60
                         if not (live_data_is_current(asset) or fresh):        # download at most once per 30 min while the vendor lags
                             refreshed = update_live_data(asset, refresh_external=True)
+                            st.session_state[f'sync_failed_{asset}'] = not refreshed
                             if refreshed:
                                 st.cache_data.clear()
                     with st.spinner(f"Running {len(members)} models…"):
@@ -256,10 +260,19 @@ with tab_fc:
                 target = r['target_date']
                 up = r['direction'] == 'UP'
                 if not live_data_is_current(asset):
-                    st.warning(f"Yahoo Finance has not yet published the {asset} bar for "
-                               f"{expected_last_complete_bar(ASSET_CONFIG[asset]['type'])} (Bitcoin's previous-day bar often appears a few hours "
-                               f"after 00:00 UTC). The forecast below therefore starts from {r['as_of_date']}, the last complete bar available; "
-                               f"press Run prediction again later for the newer bar.")
+                    expected_bar = expected_last_complete_bar(ASSET_CONFIG[asset]['type'])
+                    if st.session_state.get(f'sync_failed_{asset}'):
+                        # the download itself failed: say so, and say which data the forecast really uses
+                        st.warning(f"**Could not download new data from Yahoo Finance** (no internet connection, or Yahoo is rate-limiting). "
+                                   f"The forecast below therefore uses the **{r['data_source']}**, whose last complete bar is "
+                                   f"**{r['as_of_date']}** — not the newest market close ({expected_bar}). Connect to the internet and press "
+                                   f"**Sync live market data** or Run prediction again.")
+                    else:
+                        delay = ("Bitcoin's previous-day bar often appears a few hours after 00:00 UTC" if ASSET_CONFIG[asset]['type'] == 'crypto'
+                                 else "the futures bar is published after the 17:00 ET session end, and exchange holidays have no bar")
+                        st.warning(f"Yahoo Finance has not yet published the {asset} bar for {expected_bar} ({delay}). The forecast below "
+                                   f"therefore starts from {r['as_of_date']}, the last complete bar available ({r['data_source']}); "
+                                   f"press Run prediction again later for the newer bar.")
                 st.markdown(
                     f"<div class='final'><div class='lbl'>Final prediction — combination of {len(r['individual'])} models · "
                     f"close on {r['as_of_date']} {usd(r['current_price'])} → predicted close for {target}</div>"
@@ -410,7 +423,7 @@ with tab_fc:
                                                      dict(label="All", step="all")],
                                             bgcolor="#262C38", activecolor="#3A4252", font=dict(color="white")), row=1, col=1)
         st.plotly_chart(layout(fig, 460 if n_rows == 1 else 460 + (n_rows - 1) * 110), use_container_width=True)
-        st.caption(f"Shading: green = training (≤ {TRAIN_END}) · amber = validation (≤ {VAL_END}) · red = unseen test (held out from training, tuning and model selection). "
+        st.caption(f"Shading: green = training (≤ {TRAIN_END}) · amber = validation (≤ {VAL_END}) · red = test (never used for training or tuning; the window was inspected during development — see Limitations). "
                    "Overlays are the indicator families the model's features are built from; the model receives them as scale-free ratios.")
 
 # ═══════════════════════════════════════════════ 2. PREDICT A DAY (unseen test period)
@@ -542,10 +555,12 @@ with tab_perf:
         st.warning("Run `make evaluate` to generate results.")
     else:
         s = status
-        st.subheader("Unseen test set — held out from training, tuning and model selection")
+        st.subheader("Test set — never used for training or tuning")
         st.caption(f"Test period {s['test_period'][0]} → {s['test_period'][1]} ({tm['n_test']} days). The served forecast is the **Combined** row "
                    f"(equal-weight mean of the six trained models — no fitted weights, so nothing was chosen on the test set). "
-                   f"The best single model by walk-forward validation is **{cv_best}**.")
+                   f"The best single model by walk-forward validation is **{cv_best}**. Stated limitation: this window was inspected during "
+                   f"development (when the close-time leak was found and when the Combined forecast and the band were introduced), so it is not "
+                   f"a pristine one-shot holdout — the ≈ 6-year pooled walk-forward record below and the post-freeze days are the cleaner evidence.")
         t = te_all[te_all['asset'] == asset].sort_values('RMSE_ret')
         is_naive = (t['model'] == 'Naive').values
         BASE_LBL = {'Naive': 'Naive — random walk (tomorrow = today)', 'Naive-Mean': 'Naive-Mean — drift (training-mean return)',

@@ -271,7 +271,8 @@ def main():
             pred_df[f'pred_return_{name}'] = r
             pred_df[f'pred_close_{name}'] = prev * np.exp(r)
             pred_df[f'error_pct_{name}'] = (prev * np.exp(r) - data['true_test']) / data['true_test'] * 100
-            pred_df[f'direction_hit_{name}'] = (np.sign(r) == np.sign(true_ret)).astype(int)
+            # flat days (actual return exactly 0) have no direction: NaN, as in directional_accuracy (which excludes them)
+            pred_df[f'direction_hit_{name}'] = np.where(true_ret == 0, np.nan, (np.sign(r) == np.sign(true_ret)).astype(float))
             log.info(f"  {name:12s} RMSE_ret={met['RMSE_ret']:.5f} R2_ret={met['R2_ret']:+.3f} "
                      f"DA={met['DirAcc_pct']:.1f}% (p={met['DirAcc_pvalue']:.2f}) DM p={met['DM_pvalue']:.2f} "
                      f"RMSE$={met['RMSE_usd']:,.2f} strat={met['strategy_return_pct']:+.1f}% B&H={met['buy_hold_return_pct']:+.1f}%")
