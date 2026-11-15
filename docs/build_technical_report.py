@@ -111,10 +111,30 @@ POOL = pd.read_csv(os.path.join(RESULTS_DIR, 'walkforward_pooled.csv'))
 BANDC = pd.read_csv(os.path.join(RESULTS_DIR, 'band_calibration.csv'))
 _fresh_path = os.path.join(RESULTS_DIR, 'experiments', 'fresh_holdout.csv')
 FRESH = pd.read_csv(_fresh_path) if os.path.exists(_fresh_path) else None
+VOL_DIR = os.path.join(RESULTS_DIR, 'volatility')
+VOLT = pd.read_csv(os.path.join(VOL_DIR, 'vol_test.csv'))                 # risk forecast: one test evaluation per candidate
+VOLW = pd.read_csv(os.path.join(VOL_DIR, 'vol_walkforward.csv'))          # risk forecast: walk-forward (selection) evidence
+VOLB = pd.read_csv(os.path.join(VOL_DIR, 'band_candidates.csv'))          # band σ_t candidates
+VOLART = {a: json.load(open(os.path.join(ROOT, 'data', 'models', f'{get_prefix(a)}_vol_5d.json'))) for a in ASSETS}
+def volsel(a):
+    """(served test row, its walk-forward row) of the risk forecast for asset a."""
+    t = VOLT[(VOLT.asset == a) & (VOLT.selected)].iloc[0]
+    days = 'all out-of-fold' if t['candidate'] != 'HAR-IV' else VOLW[(VOLW.asset == a) & (VOLW.days != 'all out-of-fold')]['days'].iloc[0]
+    w = VOLW[(VOLW.asset == a) & (VOLW.candidate == t['candidate']) & (VOLW.days == days)].iloc[0]
+    return t, w
+def _predictability(a):
+    """Train+val only: corr(EWMA vol_t, |r_t+1|) and the largest |corr(feature_t, r_t+1)| over the model features."""
+    f = feat[a].loc[:VAL_END]
+    nxt = f['log_return'].shift(-1)
+    cols = [c for c in f.columns if c not in LEVEL_COLUMNS]
+    return float(f['ewma_vol'].corr(nxt.abs())), float(f[cols].corrwith(nxt).abs().max())
+VOL_LABEL = {'Ridge': 'Ridge on the scaled features', 'HAR-IV': 'HAR + implied volatility', 'HAR': 'HAR', 'EWMA': 'EWMA rule',
+             'Persistence': 'persistence', 'LightGBM': 'LightGBM', 'CatBoost': 'CatBoost'}
 hist = {a: pd.read_csv(os.path.join(RESULTS_DIR, 'predictions', f'{get_prefix(a)}_test_predictions.csv'),
                        parse_dates=['date', 'target_date']) for a in ASSETS}
 raw = {a: pd.read_csv(os.path.join(RAW_DATA_DIR, ASSET_CONFIG[a]['filename']), parse_dates=['timestamp']) for a in ASSETS}
 feat = {a: pd.read_csv(os.path.join(PROCESSED_DATA_DIR, f'{get_prefix(a)}_features.csv'), index_col=0, parse_dates=True) for a in ASSETS}
+PRED = {a: _predictability(a) for a in ASSETS}
 ext_raw = {n: pd.read_csv(os.path.join(RAW_DATA_DIR, f), parse_dates=['timestamp']) for n, f in
            [('DXY', 'dxy_data.csv'), ('WTI', 'crude_oil_data.csv'), ('TNX', 'tnx_data.csv'), ('SP500', 'sp500_data.csv'),
             ('VIX', 'vix_data.csv'), ('FG', 'fear_greed_data.csv')]}
@@ -387,6 +407,10 @@ def build():
             'P·exp(r̂ ± k·σ<sub>t</sub>) that replaced the earlier ±1-RMSE band (§16.2); a live scorecard on the Forecast tab and a Predict-a-Day list that grows with new '
             'live days (§23); the fresh hold-out on days published after the data were frozen (§22); and the audit of 13 November 2026 (§32), which restored a raw data '
             'file that an editor had re-formatted, repaired the CI workflow and pinned the environment. Every table is regenerated from the result files.', 'box'),
+          P('<b>Addendum of 15 November 2026.</b> A second served output, the <b>risk forecast</b> (volatility of the next 5 trading days, §16.3), selected under '
+            'decision rules written down before the run (<font name="Mono">results/volatility/PREREGISTRATION.md</font>); free implied-volatility series (CBOE GVZ, Deribit DVOL) '
+            'as candidate inputs; and a pre-registered comparison of GARCH(1,1) and HAR against EWMA as the volatility of the 68 % band (§16.4). The next-day price forecast and '
+            'all of its results are unchanged.', 'box'),
           NextPageTemplate('main'), PageBreak()]
 
     # ---------------------------------------------------------------- TOC
@@ -431,6 +455,11 @@ def build():
             (ct['Bitcoin']['MAPE_usd'], ct['Gold']['MAPE_usd'], ct['Silver']['MAPE_usd'], nt['Bitcoin']['MAPE_usd'], nt['Gold']['MAPE_usd'], nt['Silver']['MAPE_usd'],
              ct['Bitcoin']['DirAcc_pct'], ct['Gold']['DirAcc_pct'], ct['Silver']['DirAcc_pct'], ct['Bitcoin']['DirAcc_pvalue'], ct['Gold']['DirAcc_pvalue'], ct['Silver']['DirAcc_pvalue'],
              ct['Bitcoin']['DM_pvalue'], ct['Gold']['DM_pvalue'], ct['Silver']['DM_pvalue'])),
+          P('<b>Where the data does have skill: the risk forecast.</b> The <i>size</i> of the coming moves is predictable even though their direction is not (volatility clusters). '
+            'A second output forecasts the volatility of the next 5 trading days; the method per asset was chosen on the walk-forward folds under pre-registered rules and scored once on the test set. '
+            + '; '.join(f'{a}: {VOL_LABEL[volsel(a)[0]["candidate"]]}, test RMSE {volsel(a)[0]["RMSE_vs_ref_pct_vs_persistence"]:+.1f} %% vs persistence '
+                        f'(DM p = {volsel(a)[0]["DM_p_vs_persistence"]:.3f})' for a in ASSETS).replace('%%', '%')
+            + '. For Bitcoin and Gold this is a statistically significant improvement over the simple baseline on unseen data; for Silver the validated choice (EWMA) did not beat persistence on the test window, and that is reported as it is (§16.3).'),
           P('<b>Automatic daily predictions — status.</b> An automatic daily forward-prediction record (scheduled job that saves each day\'s forecast and verifies it '
             'against the next day\'s actual close with HIT/FAIL) was built and <b>removed from the final system at the author\'s decision</b> (14 September 2026). '
             'The final code base contains <i>no scheduler and no persistent forward log</i>. Out-of-sample evidence comes instead from the unseen test period '
@@ -922,8 +951,9 @@ def build():
             'the temptation to cherry-pick the model that happened to do best on the test window.')]
 
     F += [H2('16.2 The calibrated 68 % uncertainty band')]
-    F += [P('Every served forecast carries a band <b>P<sub>t</sub> · exp(r̂ ± k·σ<sub>t</sub>)</b>, where σ<sub>t</sub> is the RiskMetrics EWMA volatility (λ = 0.94) of the returns up to day t '
-            '(the <font name="Mono">ewma_vol</font> feature) and k is calibrated once by <font name="Mono">backtesting.py :: band_rows</font> as the 68.27 % quantile of |r − r̂| / σ<sub>t</sub> '
+    F += [P('Every served forecast carries a band <b>P<sub>t</sub> · exp(r̂ ± k·σ<sub>t</sub>)</b>, where σ<sub>t</sub> is the one-day volatility known at day t — the RiskMetrics EWMA volatility (λ = 0.94, '
+            'the <font name="Mono">ewma_vol</font> feature) for ' + ' and '.join(a for a in ASSETS if st[a]['band'].get('sigma_method', 'EWMA') == 'EWMA') + ', and the method that won the pre-registered comparison of §16.4 otherwise ('
+            + ', '.join(f"{a}: {st[a]['band']['sigma_method']}" for a in ASSETS if st[a]['band'].get('sigma_method', 'EWMA') != 'EWMA') + ') — and k is calibrated once by <font name="Mono">backtesting.py :: band_rows</font> as the 68.27 % quantile of |r − r̂| / σ<sub>t</sub> '
             'over the walk-forward out-of-fold errors of the <b>training</b> period. The band therefore widens in volatile regimes and narrows in calm ones — volatility is the one '
             'quantity this data does predict (experiment E4) — and its coverage on validation and test is out-of-sample. Daily returns are fat-tailed, so a plain ±1σ band over-covers; k &lt; 1 corrects that. '
             'It replaced the earlier ±1-RMSE band, whose width came from the test period itself.')]
@@ -934,8 +964,57 @@ def build():
             bc.append([a, f'{b_.loc["conditional", "k"]:.2f}', sp, f'{b_.loc["conditional", "coverage_pct"]:.1f}', f'{b_.loc["conditional_1sigma", "coverage_pct"]:.1f}',
                        f'{b_.loc["fixed", "coverage_pct"]:.1f}', f'{b_.loc["conditional", "mean_sigma_pct"]:.2f}'])
     F += [table(bc, [1.6 * cm, 1.0 * cm, 1.9 * cm, 3.3 * cm, 3.0 * cm, 2.7 * cm, 2.6 * cm], align_right_from=1, font=7.3),
-          P('Table 18b. results/band_calibration.csv — share of days whose actual close fell inside each band (nominal 68.3 %). On the test period the served band is close to nominal for all '
-            'three assets; on the shorter, more volatile validation window it under-covers for Bitcoin and Silver (Silver\'s late-2025 volatility jump makes every EWMA band too narrow there).', 'caption')]
+          P('Table 18b. results/band_calibration.csv — share of days whose actual close fell inside each band (nominal 68.3 %). ' +
+            ' '.join(f"{a}: served σ<sub>t</sub> = {st[a]['band'].get('sigma_method', 'EWMA')}, test coverage {st[a]['band']['test_conditional_coverage_pct']:.1f} %." for a in ASSETS) +
+            ' For Bitcoin the previous EWMA band covered ' + f"{st['Bitcoin']['band'].get('test_conditional_ewma_coverage_pct', float('nan')):.1f}" + ' % of test days (see §16.4). '
+            'Silver\'s late-2025 volatility jump makes every band under-cover on the validation window.', 'caption')]
+
+    # ---------------------------------------------------------------- 16.3 risk forecast
+    F += [H2('16.3 The risk forecast — volatility of the next 5 trading days')]
+    F += [P('<b>Why.</b> Next-day returns carry no exploitable signal in this data (§14–15), but their magnitude does: volatility clusters. In the training and validation data the correlation of today\'s EWMA volatility with the size of '
+            'tomorrow\'s move is ' + ' / '.join(f'{PRED[a][0]:.2f}' for a in ASSETS) + ' (Bitcoin / Gold / Silver), against at most ' + ' / '.join(f'{PRED[a][1]:.3f}' for a in ASSETS) + ' for any feature\'s correlation with the move itself. A forecast of the coming volatility is therefore the part of the problem where a model can be shown to beat a simple baseline.'),
+          P('<b>Target and candidates.</b> Target: ln of the realised volatility of the next 5 trading days, ln √(mean r²<sub>t+1…t+5</sub>) (<font name="Mono">config.TASKS[\'vol_5d\']</font>, exact embargo). '
+            'Candidates: persistence (last 5 days\' realised volatility), EWMA, the HAR model of Corsi (2009) in log form, HAR plus an implied-volatility index, and Ridge / LightGBM / CatBoost on the 28–29 scaled features. '
+            'Implied volatility is free: <b>CBOE GVZ</b> (gold ETF volatility index, from 2009, published 16:15 ET — after the 13:30 settlement, so lagged one day for Gold and Silver, the same close-time rule as every macro series) and '
+            '<b>Deribit DVOL</b> (Bitcoin, from 2021-03, its daily candle closes at the same 00:00 UTC instant as the BTC bar). No long free silver implied-volatility series exists; GVZ is used for Silver as a cross-asset proxy.'),
+          P('<b>Pre-registered decision rule</b> (written before the run, <font name="Mono">results/volatility/PREREGISTRATION.md</font>): (1) the non-implied-volatility candidate with the lowest pooled walk-forward RMSE is chosen; '
+            '(2) HAR + implied volatility replaces it only if it is better on the days where the index exists with DM p &lt; 0.05; (3) the choice is served only if it beats persistence with DM p &lt; 0.05 on the walk-forward days; '
+            '(4) the choice is refitted on train+val and scored once on the test set, whatever the result. DM tests use Newey–West variance with 4 lags because the 5-day targets overlap.', 'box')]
+    vt = [['Asset', 'Served (chosen on walk-forward)', 'Walk-forward days', 'Walk-forward vs persistence', 'Test days', 'Test vs persistence (DM p)', 'Test vs EWMA (DM p)']]
+    for a in ASSETS:
+        t_, w_ = volsel(a)
+        vt.append([a, VOL_LABEL[t_['candidate']], f"{int(w_['n']):,}", f"{w_['RMSE_vs_ref_pct']:+.1f} %", f"{int(t_['n'])}",
+                   f"{t_['RMSE_vs_ref_pct_vs_persistence']:+.1f} % ({t_['DM_p_vs_persistence']:.3f})",
+                   '—' if t_['candidate'] == 'EWMA' else f"{t_['RMSE_vs_ref_pct_vs_ewma']:+.1f} % ({t_['DM_p_vs_ewma']:.3f})"])
+    F += [table(vt, [1.5 * cm, 3.7 * cm, 2.0 * cm, 2.4 * cm, 1.4 * cm, 3.0 * cm, 2.6 * cm], align_right_from=2, font=7.3),
+          P('Table 18c. results/volatility/vol_walkforward.csv and vol_test.csv — RMSE of log volatility relative to persistence (negative = more accurate). The full candidate tables, including the rows that were not '
+            'selected, are in results/volatility/VOLATILITY_RESULTS.md and on the dashboard\'s Model Performance tab.', 'caption')]
+    sil = VOLT[(VOLT.asset == 'Silver')].set_index('candidate')
+    F += [P('<b>Reading.</b> For Bitcoin and Gold the served risk forecast is significantly more accurate than persistence on unseen days, and also more accurate than the EWMA rule. For Gold the implied-volatility index is what '
+            'made the difference (HAR + GVZ passed rule 2). For Silver no model beat the EWMA rule on the walk-forward folds, so EWMA is served; on the test window it was no better than persistence '
+            f'({sil.loc["EWMA", "RMSE_vs_ref_pct_vs_persistence"]:+.1f} %). HAR + GVZ did better there ({sil.loc["HAR-IV", "RMSE_vs_ref_pct_vs_persistence"]:+.1f} %), but adopting it now would be '
+            'selection on the test set, so it is not served.'),
+          P('<b>Disclosed deviation.</b> The first run produced a degenerate HAR + DVOL fit for Bitcoin\'s first walk-forward fold, which ends in 2019, before DVOL exists: the fit had zero rows and predicted with all-zero coefficients. '
+            'The bug was fixed (a fit now needs ≥ 250 complete rows, otherwise it makes no forecast) after that run\'s test table had been printed. The decision rules were not changed, and the fix changed no decision.', 'warn'),
+          P('<b>In the product.</b> The Forecast tab shows the expected daily and 5-day move with a LOW / NORMAL / HIGH label (terciles of the training period\'s realised volatility), the method, and its test result; the API returns the same '
+            'object (<font name="Mono">volatility</font>). If the implied-volatility series cannot be downloaded, the risk forecast is withheld with a reason rather than computed from a stale value (<font name="Mono">src/volatility/forecast.py</font>).')]
+
+    # ---------------------------------------------------------------- 16.4 band volatility
+    F += [H2('16.4 Which volatility for the band? GARCH(1,1) and HAR against EWMA')]
+    F += [P('Pre-registered rule: GARCH(1,1) (Gaussian maximum likelihood on training-split returns, filtered forward with fixed parameters) or a HAR regression of r²<sub>t+1</sub> replaces EWMA as σ<sub>t</sub> of the band only if, '
+            'on the validation split\'s walk-forward days, it has both a lower QLIKE and a coverage error no larger than EWMA\'s; k is recalibrated on the training errors exactly as before.')]
+    bt = [['Asset', 'σ<sub>t</sub>', 'k', 'Validation coverage %', 'Validation QLIKE', 'Test coverage %', 'Test QLIKE', 'Selected']]
+    for a in ASSETS:
+        for sg in ('EWMA', 'HAR-1d', 'GARCH(1,1)'):
+            v_ = VOLB[(VOLB.asset == a) & (VOLB.sigma == sg) & (VOLB.split == 'validation')].iloc[0]
+            t2 = VOLB[(VOLB.asset == a) & (VOLB.sigma == sg) & (VOLB.split == 'test')].iloc[0]
+            bt.append([a, sg, f"{v_['k']:.2f}", f"{v_['coverage_pct']:.1f}", f"{v_['qlike_sigma']:.3f}", f"{t2['coverage_pct']:.1f}", f"{t2['qlike_sigma']:.3f}", 'yes' if v_['selected'] else ''])
+    F += [table(bt, [1.5 * cm, 2.2 * cm, 1.1 * cm, 2.6 * cm, 2.3 * cm, 2.3 * cm, 2.0 * cm, 1.6 * cm], align_right_from=2, font=7.3),
+          P('Table 18d. results/volatility/band_candidates.csv (nominal coverage 68.3 %; lower QLIKE is better).', 'caption'),
+          P('<b>Reading — including a negative result.</b> GARCH(1,1) won for Bitcoin on validation and is served. On the test set the improvement did <b>not</b> hold: the GARCH band covered '
+            f"{VOLB[(VOLB.asset == 'Bitcoin') & (VOLB.sigma == 'GARCH(1,1)') & (VOLB.split == 'test')]['coverage_pct'].iloc[0]:.1f} % of days against "
+            f"{VOLB[(VOLB.asset == 'Bitcoin') & (VOLB.sigma == 'EWMA') & (VOLB.split == 'test')]['coverage_pct'].iloc[0]:.1f} % for the previous EWMA band (nominal 68.3 %), with a slightly worse QLIKE. "
+            'It is kept because the rule fixed in advance chose it; reverting because of the test result would be selection on the test set. EWMA stayed for Gold and Silver.')]
 
     # ================================================================ 17. USER WORKFLOW
     F += [H1('17. How a User Generates a Prediction')]
@@ -1236,6 +1315,8 @@ def build():
         '<b>Phase-A validation metrics are mildly optimistic.</b> LightGBM, CatBoost, GRU and LSTM choose their stopping point on the validation set they are then scored on (Table 12, Figure 6). Model selection uses the walk-forward folds instead, and the test, pooled and fresh results are unaffected.',
         '<b>Walk-forward folds share the training-split scaler</b> (and target mean/std), so the early folds are scaled with statistics that include later training data. This affects only model selection, the pooled evidence and the band\'s k, and only the scale-sensitive Ridge/GRU/LSTM; any bias favours the models.',
         '<b>Data limitations.</b> Yahoo Finance is an unofficial free source; BTC-USD is a composite index; GC=F / SI=F are continuous front-month series with roll effects and unusable volume; Yahoo revises a few historical closes between downloads (mean &lt; 0.005 %, max 0.75 % on one Bitcoin day) and publishes Bitcoin\'s previous-day bar with a delay; the metals\' macro features are one day old by construction (close-time rule); Fear &amp; Greed is a proprietary composite.',
+        '<b>Risk forecast: no gain for Silver on the test window.</b> The validated choice (EWMA) was no better than persistence there; a better-looking test row (HAR + GVZ) is not adopted because it was not the validated choice (§16.3). Silver has no free implied-volatility series of its own.',
+        '<b>Bitcoin\'s GARCH band over-covered on the test window</b> (§16.4) although it won on validation — the validation and test windows disagree, so the band choice for Bitcoin is not robustly established.',
         '<b>A simple uncertainty band.</b> The band k·σ<sub>t</sub> is calibrated on training-period errors and close to nominal on the test period, but it is a single-parameter volatility rule, not a full predictive distribution, and it under-covers in sudden volatility jumps (Silver, validation window).',
         '<b>Asset-specific.</b> Bitcoin\'s 7-day calendar vs the metals\' exchange calendar; exchange holidays are not modelled for the target-date label; Silver depends on gold\'s same-day return being available.',
         '<b>Modelling choices.</b> Small hyper-parameter grids; a single 32-unit recurrent layer; selection by mean fold RMSE (a practitioner might select on direction or Sharpe); the stacked ensemble is a linear blend; the combination is an equal-weight mean, which is a ceiling when the members carry no signal.',
@@ -1254,8 +1335,8 @@ def build():
     F += bullets([
         '<b>Restore and run the automatic daily forward record</b> for a longer period (months, not days) — the prototype design exists (§19); it would turn the operational pipeline into a continuously growing out-of-sample history.',
         '<b>Longer and more diverse test evidence:</b> several rolling test windows or a full walk-forward re-training schedule over 2022–2026 instead of one frozen window, to show robustness across regimes.',
-        '<b>Volatility forecasting as a product:</b> experiment E4 showed 22-day realised volatility <i>is</i> more predictable than the return (Bitcoin Ridge −11.5 % RMSE vs persistence, though only ~4 % better than EWMA and worse than EWMA for Silver); a served volatility band would be more useful than a point price.',
-        '<b>Richer uncertainty:</b> conformal or quantile-regression intervals, or a GARCH-type volatility model, in place of the single-parameter k·σ<sub>t</sub> band.',
+        '<b>Volatility forecasting:</b> now served (§16.3). Next steps: a longer test record, and a silver-specific implied-volatility series if a free one becomes available.',
+        '<b>Richer uncertainty:</b> GARCH(1,1) and HAR were tested against EWMA (§16.4) with mixed evidence; conformal or quantile-regression intervals are the natural next step.',
         '<b>Additional information sources</b> with verified timestamps: order-flow / on-chain metrics for Bitcoin, positioning data (COT) for the metals, news sentiment — every new series must pass the close-time check.',
         '<b>More data:</b> intraday bars would give many more samples per year and permit realised-volatility features at finer resolution.',
         '<b>Modelling:</b> larger tuning budgets with nested CV, temporal-fusion or attention models only if the data volume justifies them, and probabilistic (distributional) losses.',
@@ -1278,6 +1359,7 @@ def build():
                  ['Strongest parts', 'Leakage audit and the discovered close-time leak; walk-forward validation with formal tests; the equal-weight combination that removes model cherry-picking; reproducibility (frozen dates, seeds, single loader, tests, CI); a dashboard that shows reliability next to every number.', '—'],
                  ['Weakest parts', 'No predictive skill over the random walk (expected, but it is the result); one frozen test window that was inspected during development (mitigated by the pooled and fresh evidence); no persistent live record; a simple single-parameter band; free-vendor data quirks (contract rolls, delayed bars, degenerate futures bars).', '—'],
                  ['Audit of 13 November 2026 — what was fixed', '(1) data/raw/bitcoin_data.csv (and three backup files) had been re-formatted with padded spaces by an editor, which stopped preprocessing with KeyError: \'timestamp\' — restored byte-identical from git, and the loader now tolerates padding; (2) the CI workflow never built the processed data, so 10 tests failed on every push — fixed, CI now runs preprocessing and the full suite on a pinned environment; (3) the lock file lacked five packages and Python 3.13+ cannot install TensorFlow 2.16 — lock regenerated, Python 3.10–3.12 documented; (4) this report updated to the final system; (5) dashboard wording made exact (offline message, test-window caveat); (6) the fresh hold-out added. Every test-set result was re-verified unchanged.', '§22, §28; README'],
+                 ['Addendum of 15 November 2026', 'Risk forecast (§16.3): Bitcoin and Gold significantly better than persistence on unseen days, Silver no gain; free implied volatility (GVZ, DVOL); band volatility comparison (§16.4) with GARCH served for Bitcoin and a test-window regression reported. Price forecast and its results unchanged.', 'results/volatility/; tests/test_volatility.py'],
                  ['Before the viva', 'Commit and push the audit changes (CI should turn green); rehearse the honest framing of the negative result; have the frozen dataset ready in case the venue has no internet (the dashboard then states that it uses the stored data).', '—']],
                 [3.6 * cm, 8.6 * cm, 4.4 * cm], align_right_from=None, font=7.3),
           P('Table 29. Final status.', 'caption')]
@@ -1299,7 +1381,10 @@ def build():
             f'<b>Results →</b> the combined forecast\'s next-day error is {ct["Bitcoin"]["MAPE_usd"]:.2f} % / {ct["Gold"]["MAPE_usd"]:.2f} % / {ct["Silver"]["MAPE_usd"]:.2f} % of price — the same as the random walk\'s — with directional accuracy '
             f'{ct["Bitcoin"]["DirAcc_pct"]:.1f} / {ct["Gold"]["DirAcc_pct"]:.1f} / {ct["Silver"]["DirAcc_pct"]:.1f} % and Diebold–Mariano p = {ct["Bitcoin"]["DM_pvalue"]:.2f} / {ct["Gold"]["DM_pvalue"]:.2f} / {ct["Silver"]["DM_pvalue"]:.2f}: '
             'no model, single or combined, beats the random walk at a one-day horizon in this data — confirmed on ≈ 6 years of pooled walk-forward predictions and on the days published after the data were frozen. The project\'s value is a correct, tested, transparent and reproducible pipeline that reports that result honestly — '
-            'including the discovery and correction of a close-time data leak that had produced an apparently significant 62 % result.')]
+            'including the discovery and correction of a close-time data leak that had produced an apparently significant 62 % result. '
+            '<b>Risk forecast →</b> the volatility of the next 5 trading days <i>is</i> predictable: the served forecast beats persistence on unseen days by '
+            + ' / '.join(f"{-volsel(a)[0]['RMSE_vs_ref_pct_vs_persistence']:.1f} %" for a in ASSETS) + ' (Bitcoin / Gold / Silver; DM p = '
+            + ' / '.join(f"{volsel(a)[0]['DM_p_vs_persistence']:.3f}" for a in ASSETS) + ').')]
     F += [Spacer(1, 10), P('<i>End of report. Regenerate with</i> <font name="Mono">python docs/build_technical_report.py</font>; <i>all tables are produced from the result files at build time.</i>', 'small')]
     return F
 
