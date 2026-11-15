@@ -23,6 +23,25 @@ from config import (RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR, ASSET_CONFIG, 
                     get_prefix)
 
 
+def _read_raw_csv(path, **kwargs):
+    """
+    Read a raw CSV robustly: spaces around separators and column names are ignored. A CSV "aligned" by an editor
+    (e.g. `timestamp , open , …`) otherwise yields a column called 'timestamp ' and the whole pipeline stops with
+    KeyError: 'timestamp'. Values are unaffected (numbers parse identically with or without padding).
+    """
+    if 'parse_dates' in kwargs:                         # parse after the names are stripped
+        dates = kwargs.pop('parse_dates')
+        df = _read_raw_csv(path, **kwargs)
+        for c in dates:
+            df[c] = pd.to_datetime(df[c])
+        return df
+    df = pd.read_csv(path, skipinitialspace=True, **kwargs)
+    df.columns = df.columns.str.strip()
+    for c in df.columns[df.dtypes == object]:
+        df[c] = df[c].str.strip()
+    return df
+
+
 class DataCleaner:
     """Loads a raw OHLCV CSV, cleans it and adds features.
 
@@ -46,7 +65,7 @@ class DataCleaner:
         if not os.path.exists(self.raw_path):
             print(f"Error: Raw file not found for {self.asset_name} at {self.raw_path}")
             return False
-        self.df = pd.read_csv(self.raw_path)
+        self.df = _read_raw_csv(self.raw_path)
         self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
         print(f"Loaded {len(self.df)} rows for {self.asset_name}.")
         return True
@@ -160,7 +179,7 @@ class DataCleaner:
         path = os.path.join(self.raw_dir, fname)
         if not os.path.exists(path):
             return None
-        s = pd.read_csv(path, parse_dates=['timestamp']).set_index('timestamp')[col]
+        s = _read_raw_csv(path, parse_dates=['timestamp']).set_index('timestamp')[col]
         return s[~s.index.duplicated()].sort_index()
 
     def add_external_features(self):

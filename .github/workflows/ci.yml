@@ -16,16 +16,23 @@ jobs:
       with:
         python-version: '3.11'
         cache: 'pip'
+        cache-dependency-path: requirements-lock.txt
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r requirements-lock.txt   # exact environment verified on Linux / Python 3.11
     - name: Import checks
       run: |
         python -c "import config"
         python -c "from src.data.preprocessing import DataCleaner, build_dataset"
         python -c "from src.models.registry import make_model, ALL_MODELS"
         python -c "from src.evaluation.backtesting import main"
+    - name: Build processed data from the frozen raw data
+      # data/processed/ is git-ignored, and most tests (split, look-ahead, inference, band) read it.
+      # Without this step 10 tests fail with "No processed data … Run `make preprocess` first".
+      run: |
+        python src/data/preprocessing.py
+        git checkout -- data/models/        # keep the committed scalers byte-identical (refit differs by ~1e-16 across platforms)
     - name: Run tests
       run: python -m pytest tests/ -q
       env:

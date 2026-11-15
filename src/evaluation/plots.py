@@ -206,7 +206,7 @@ def overfitting_gap():
         a = a.sort_values('val')
         x = np.arange(len(a))
         ax.bar(x - 0.2, a['train'], 0.4, label='train (in-sample)', color='#90CAF9')
-        ax.bar(x + 0.2, a['val'], 0.4, label='validation (out-of-sample)', color='#1565C0')
+        ax.bar(x + 0.2, a['val'], 0.4, label='validation (early-stopping set)', color='#1565C0')
         ax.set_xticks(x); ax.set_xticklabels(a.index, rotation=30, ha='right')
         # random-walk reference: RMSE of a zero forecast = RMS of the true returns in each split
         from src.data.preprocessing import build_dataset
@@ -215,7 +215,9 @@ def overfitting_gap():
             rw = float(np.sqrt(np.mean(d[f'y_real_{split}'] ** 2)))
             ax.axhline(rw, color='red', ls=ls, lw=1, label=f'random walk ({split})')
         ax.set_title(f'{asset} — RMSE(return): train vs validation'); ax.legend(fontsize=7)
-    fig.suptitle('Over-fitting check — compare each model\'s gap with the random-walk gap: the validation period is simply more volatile than training', fontweight='bold', fontsize=10)
+    fig.suptitle('Over-fitting check — compare each model\'s gap with the random-walk gap: the validation period is simply more volatile than training.\n'
+                 'LightGBM / CatBoost / GRU / LSTM pick their stopping point on this validation set, so their validation bars are mildly optimistic.',
+                 fontweight='bold', fontsize=9)
     save(fig, 'overfitting_gap.png')
 
 

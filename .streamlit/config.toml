@@ -2,3 +2,7 @@
 gatherUsageStats = false
 [server]
 headless = true
+[theme]
+# The app's CSS paints a dark background (#0E1117); without a fixed dark base theme a browser in light mode renders
+# Streamlit's dark-grey text on that dark background and most headings and captions become unreadable.
+base = "dark"

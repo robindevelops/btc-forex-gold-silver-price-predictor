@@ -1,3 +1,6 @@
+# Python 3.10–3.12 (TensorFlow 2.16.2 has no wheels for Python 3.13+). requirements-lock.txt pins the exact
+# environment the tests and the evaluation were verified with.
+
 # Core Data & ML
 pandas==2.3.3
 numpy==1.26.4
@@ -39,3 +42,6 @@ pytest>=7.0.0
 
 # Notebooks
 jupyter==1.1.1
+
+# Technical report (docs/build_technical_report.py)
+reportlab>=4.0

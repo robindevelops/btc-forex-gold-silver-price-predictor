@@ -1,4 +1,4 @@
-.PHONY: install test collect-data preprocess eda tune train stack evaluate volatility figures experiments pipeline serve api clean
+.PHONY: install test collect-data preprocess eda tune train stack evaluate volatility figures experiments fresh-holdout report pipeline serve api clean
 
 PY ?= python
 
@@ -42,6 +42,12 @@ experiments:             ## design experiments (validation only) + before/after 
 	$(PY) src/experiments/audit_improvements.py
 	$(PY) src/experiments/final_candidates.py
 	$(PY) src/experiments/before_after.py
+
+fresh-holdout:           ## frozen models on the days published after the frozen dataset (downloads the latest bars; needs internet)
+	$(PY) src/experiments/fresh_holdout.py --sync
+
+report:                  ## rebuild docs/FYP_Technical_Report.pdf from the result files (needs data/processed and the trained models)
+	$(PY) docs/build_technical_report.py
 
 pipeline: preprocess eda tune train stack evaluate volatility figures experiments test   ## full reproducible run from raw data
 
