@@ -7,6 +7,13 @@ import pandas as pd
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+@pytest.fixture(autouse=True)
+def _no_implied_vol_download(monkeypatch):
+    """Tests never download GVZ / DVOL (network) or write data/raw_live: the live sync's implied-vol fetch is a no-op."""
+    import src.data.sync_live_data as sl
+    monkeypatch.setattr(sl, 'fetch_implied_vol', lambda out_dir=None: {'GVZ': None, 'DVOL': None})
+
+
 @pytest.fixture
 def synthetic_price_data():
     """Generate synthetic OHLCV data for testing."""

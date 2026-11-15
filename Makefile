@@ -1,4 +1,4 @@
-.PHONY: install test collect-data preprocess eda tune train stack evaluate figures experiments pipeline serve api clean
+.PHONY: install test collect-data preprocess eda tune train stack evaluate volatility figures experiments pipeline serve api clean
 
 PY ?= python
 
@@ -11,6 +11,7 @@ test:
 collect-data:            ## download OHLCV + macro + sentiment (needs network; Yahoo may rate-limit)
 	$(PY) src/data/data_collection.py
 	$(PY) src/data/external_data.py
+	$(PY) src/volatility/implied_vol.py --frozen
 
 preprocess:              ## clean, engineer features, frozen chronological split, fit scaler on train
 	$(PY) src/data/preprocessing.py
@@ -30,6 +31,9 @@ stack:                   ## stacked-ensemble experiment (OOF meta-model)
 evaluate:                ## ONE evaluation on the untouched test set (+ the Combined forecast) and CV model comparison
 	$(PY) src/evaluation/backtesting.py
 
+volatility:              ## risk forecast (#1/#3) + band volatility (#2) under results/volatility/PREREGISTRATION.md (band part refits the 6 models per fold: ~10 min)
+	$(PY) src/volatility/evaluate.py
+
 figures:                 ## report figures into results/figures/
 	$(PY) src/evaluation/plots.py
 
@@ -39,7 +43,7 @@ experiments:             ## design experiments (validation only) + before/after 
 	$(PY) src/experiments/final_candidates.py
 	$(PY) src/experiments/before_after.py
 
-pipeline: preprocess eda tune train stack evaluate figures experiments test   ## full reproducible run from raw data
+pipeline: preprocess eda tune train stack evaluate volatility figures experiments test   ## full reproducible run from raw data
 
 predict:                 ## print today's combined next-day prediction for every asset (no logging)
 	$(PY) src/inference/prediction.py

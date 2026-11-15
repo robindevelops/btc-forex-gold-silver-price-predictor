@@ -1,0 +1,78 @@
+{
+  "asset": "Bitcoin",
+  "task": "vol_5d",
+  "horizon_days": 5,
+  "target": "ln sqrt(mean r\u00b2 over the next 5 trading days)",
+  "method": "Ridge",
+  "served": true,
+  "decision": "step 1: lowest pooled RMSE among non-IV candidates (Ridge); step 2: HAR-IV not adopted (DM p vs Ridge on IV days = 0.085); step 3: vs Persistence DM p = 2.887e-15 \u2192 served",
+  "iv_series": null,
+  "regime_thresholds_daily_vol": [
+    0.019032296714132462,
+    0.03142632958311514
+  ],
+  "train_median_daily_vol": 0.024489379025987794,
+  "fit_period": [
+    "2018-03-01",
+    "2026-02-12"
+  ],
+  "walkforward": {
+    "asset": "Bitcoin",
+    "candidate": "Ridge",
+    "days": "all out-of-fold",
+    "n": 2320,
+    "RMSE_log": 0.5475622115938054,
+    "RMSE_vs_ref_pct": -19.540942007699513,
+    "QLIKE": 0.8600867113252265,
+    "DM_stat": -7.944576856083767,
+    "DM_p": 2.886579864025407e-15
+  },
+  "test": {
+    "asset": "Bitcoin",
+    "candidate": "Ridge",
+    "selected": true,
+    "served": true,
+    "n": 203,
+    "RMSE_log": 0.4525726240193928,
+    "RMSE_vs_ref_pct_vs_persistence": -23.99846884967304,
+    "QLIKE": 0.4514822237361109,
+    "DM_stat_vs_persistence": -2.24681056827065,
+    "DM_p_vs_persistence": 0.0257339123898932,
+    "RMSE_vs_ref_pct_vs_ewma": -11.069662752847565,
+    "DM_p_vs_ewma": 0.014211742894275847
+  },
+  "test_ewma": {
+    "asset": "Bitcoin",
+    "candidate": "EWMA",
+    "selected": false,
+    "served": false,
+    "n": 203,
+    "RMSE_log": 0.5089069017714585,
+    "RMSE_vs_ref_pct_vs_persistence": -14.538127816713587,
+    "QLIKE": 0.6252716474991445,
+    "DM_stat_vs_persistence": -1.696472487464009,
+    "DM_p_vs_persistence": 0.09133684828920852,
+    "RMSE_vs_ref_pct_vs_ewma": 0.0,
+    "DM_p_vs_ewma": NaN
+  },
+  "test_persistence": {
+    "asset": "Bitcoin",
+    "candidate": "Persistence",
+    "selected": false,
+    "served": false,
+    "n": 203,
+    "RMSE_log": 0.595478297830906,
+    "RMSE_vs_ref_pct_vs_persistence": 0.0,
+    "QLIKE": 2.265025624144815,
+    "DM_stat_vs_persistence": NaN,
+    "DM_p_vs_persistence": NaN,
+    "RMSE_vs_ref_pct_vs_ewma": 17.011244248820432,
+    "DM_p_vs_ewma": 0.09133684828920852
+  },
+  "model": {
+    "artefact": "btc_ridge_vol_5d.pkl",
+    "name": "Ridge",
+    "target_mean": -3.750338922170551,
+    "target_std": 0.6297200036108721
+  }
+}

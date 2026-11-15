@@ -274,9 +274,38 @@ with tab_fc:
                     cal_txt = (f" On the unseen test period this band contained the actual close on **{cov:.0f}%** of days "
                                f"(nominal 68%; a fixed-width band: {cov_fixed:.0f}%)." if cov is not None and cov_fixed is not None else "")
                     st.caption(f"**68% band: {usd_md(band[0])} – {usd_md(band[1])}** — ±{r['band_halfwidth_pct']:.2f}% = {r['band_k']:.2f} × σ, where "
-                               f"σ = {r['band_sigma_pct']:.2f}% is the EWMA volatility of {asset}'s returns up to {r['as_of_date']} (so the band widens in "
+                               f"σ = {r['band_sigma_pct']:.2f}% is the {r.get('band_sigma_method', 'EWMA')} volatility forecast of {asset}'s returns made on {r['as_of_date']} (so the band widens in "
                                f"volatile periods and narrows in calm ones) and {r['band_k']:.2f} was calibrated on the training period's walk-forward errors. "
                                f"It is far wider than the predicted move — that is the honest picture of next-day uncertainty.{cal_txt}")
+
+                # risk (volatility) forecast — the part of the problem where the data has demonstrable skill
+                st.markdown("#### Risk forecast — how much will the price move over the next 5 trading days?")
+                vol = r.get('volatility')
+                if vol is None:
+                    st.info(f"Risk forecast not available: {r.get('volatility_unavailable_reason') or 'no volatility model'}. "
+                            "Press **Sync live market data** (needs internet) to download the implied-volatility series.")
+                else:
+                    regime_col = {'low': '#2ECC71', 'normal': '#F1C40F', 'high': '#FF5252'}[vol['regime']]
+                    method_txt = {'Ridge': 'Ridge regression on the 29 features', 'HAR-IV': 'HAR model + implied volatility (GVZ)',
+                                  'HAR': 'HAR model', 'EWMA': 'EWMA volatility (simple rule — no ML model beat it)',
+                                  'LightGBM': 'LightGBM', 'CatBoost': 'CatBoost', 'Persistence': 'last 5 days\' volatility'}.get(vol['method'], vol['method'])
+                    v1, v2, v3 = st.columns(3)
+                    v1.metric("Expected daily move", f"±{vol['daily_vol_pct']:.2f}%",
+                              help="Forecast of the typical (root-mean-square) daily return over the next 5 trading days.")
+                    v2.metric("Expected 5-day move", f"±{vol['five_day_vol_pct']:.2f}%")
+                    v3.markdown(f"<div style='padding-top:0.3rem'><span style='color:#A0A4AB;font-size:0.85rem'>Risk level vs {asset}'s training "
+                                f"history</span><br><span style='font-size:1.7rem;font-weight:700;color:{regime_col}'>{vol['regime'].upper()}</span>"
+                                f"<br><span style='color:#A0A4AB;font-size:0.8rem'>usual: ±{vol['train_median_daily_vol_pct']:.2f}% per day</span></div>",
+                                unsafe_allow_html=True)
+                    t_ = vol['test']
+                    if vol['is_ml'] and t_.get('RMSE_vs_ref_pct_vs_persistence') is not None:
+                        st.caption(f"Model: **{method_txt}**, chosen by a pre-registered walk-forward rule. On the {t_['n']} unseen test days its volatility "
+                                   f"forecast was **{abs(t_['RMSE_vs_ref_pct_vs_persistence']):.0f}% more accurate** than \"same volatility as the last 5 days\" "
+                                   f"(Diebold–Mariano p = {t_['DM_p_vs_persistence']:.3f}) and {abs(t_['RMSE_vs_ref_pct_vs_ewma']):.0f}% more accurate than the EWMA "
+                                   f"rule (p = {t_['DM_p_vs_ewma']:.3f}). Unlike the direction of tomorrow's move, the size of the coming moves is predictable.")
+                    else:
+                        st.caption(f"Method: **{method_txt}**. For {asset} no machine-learning volatility model beat this simple rule in walk-forward "
+                                   "validation, so the rule is shown — honestly labelled. Details: Model Performance tab.")
 
                 # each model's prediction for tomorrow + its live scorecard on the most recent days
                 st.markdown("#### Each model: tomorrow's prediction and how it did on the most recent days — calculated live")
@@ -339,7 +368,7 @@ with tab_fc:
                 fh.add_trace(go.Scatter(x=tail['timestamp'], y=tail['price'], mode='lines', name='close',
                                         line=dict(color=COLOR[asset], width=2)))
                 if band:
-                    fh.add_trace(go.Scatter(x=[next_date, next_date], y=band, mode='lines', name='68% band (EWMA vol)',
+                    fh.add_trace(go.Scatter(x=[next_date, next_date], y=band, mode='lines', name=f"68% band ({r.get('band_sigma_method', 'EWMA')} vol)",
                                             line=dict(color=BAND, width=8)))
                 fh.add_trace(go.Scatter(x=[tail['timestamp'].iloc[-1], next_date], y=[r['current_price'], r['predicted_price']],
                                         mode='lines+markers', name='combined forecast',
@@ -510,7 +539,7 @@ with tab_demo:
                     if f'band_lo_{COMBINED}' in hist.columns:
                         fd.add_trace(go.Scatter(x=pd.concat([hist['target_date'], hist['target_date'][::-1]]),
                                                 y=pd.concat([hist[f'band_hi_{COMBINED}'], hist[f'band_lo_{COMBINED}'][::-1]]),
-                                                fill='toself', fillcolor='rgba(0,224,198,0.12)', line=dict(width=0), name='68% band (EWMA vol)', hoverinfo='skip'))
+                                                fill='toself', fillcolor='rgba(0,224,198,0.12)', line=dict(width=0), name=f"68% band ({(status.get('band') or {}).get('sigma_method', 'EWMA')} vol)", hoverinfo='skip'))
                     if r['actual_price'] is not None:
                         fd.add_trace(go.Scatter(x=[pd.Timestamp(r['actual_date'])], y=[r['predicted_price']], mode='markers', name='this prediction',
                                                 marker=dict(color=ACCENT, size=13, symbol='diamond', line=dict(color='white', width=1))))
@@ -697,13 +726,38 @@ with tab_perf:
                 fb.update_layout(hovermode="closest")
                 st.plotly_chart(layout(fb, 420, f"{pick_m}: top 15 of {len(f_sel)} features (normalised importance)", legend=False), use_container_width=True)
 
+        vt, vw = load_csv(os.path.join('volatility', 'vol_test.csv')), load_csv(os.path.join('volatility', 'vol_walkforward.csv'))
+        if vt is not None and vw is not None and len(vt[vt['asset'] == asset]):
+            st.subheader("Risk (volatility) forecast — where the data has predictive skill")
+            vta = vt[vt['asset'] == asset].sort_values('RMSE_log')
+            chosen = vta[vta['selected']]['candidate'].iloc[0] if vta['selected'].any() else '—'
+            st.dataframe(pd.DataFrame({
+                'Forecast': vta['candidate'].map(lambda c: f"{c} (served)" if c == chosen else c),
+                'RMSE (log volatility)': vta['RMSE_log'].map(lambda v: f"{v:.4f}"),
+                'vs "same as last 5 days"': vta['RMSE_vs_ref_pct_vs_persistence'].map(lambda v: f"{v:+.1f}%"),
+                'DM p': vta['DM_p_vs_persistence'].map(lambda v: '—' if pd.isna(v) else f"{v:.3f}"),
+                'vs EWMA': vta['RMSE_vs_ref_pct_vs_ewma'].map(lambda v: f"{v:+.1f}%"),
+                'DM p (vs EWMA)': vta['DM_p_vs_ewma'].map(lambda v: '—' if pd.isna(v) else f"{v:.3f}")}), width='stretch', hide_index=True)
+            vwa = vw[(vw['asset'] == asset) & (vw['days'] == 'all out-of-fold')].sort_values('RMSE_log')
+            best_wf = vwa.iloc[0]
+            st.caption(f"Unseen test set ({int(vta['n'].iloc[0])} days), target = volatility of the next 5 trading days. The served forecast "
+                       f"(**{chosen}**) was chosen BEFORE the test set was read, by the rule in `results/volatility/PREREGISTRATION.md`, on "
+                       f"{int(best_wf['n']):,} walk-forward days where it was {abs(best_wf['RMSE_vs_ref_pct']):.0f}% better than persistence. "
+                       "Every other row is shown for transparency only — picking the best test row afterwards would be test-set selection."
+                       + (f" On this test window the served {chosen} forecast did **not** beat persistence "
+                          f"({float(vta[vta['selected']]['RMSE_vs_ref_pct_vs_persistence'].iloc[0]):+.1f}%); that is reported, not hidden, and the "
+                          "better-looking test rows are not adopted because they were not the validated choice."
+                          if vta['selected'].any() and float(vta[vta['selected']]['RMSE_vs_ref_pct_vs_persistence'].iloc[0]) >= 0 else ''))
+
         bc = load_csv('band_calibration.csv')
         if bc is not None and len(bc[bc['asset'] == asset]):
             st.subheader("Uncertainty band — is the 68% band honest?")
             b = bc[bc['asset'] == asset]
             k_ = float(b['k'].iloc[0]) if 'k' in b.columns else float('nan')
-            names = {'conditional': f'served: ±{k_:.2f}·σ_t (σ_t = EWMA vol at day t)', 'conditional_1sigma': 'previous: ±1·σ_t (uncalibrated)',
-                     'fixed': 'fixed width (same calibration, no volatility)'}
+            sig_m = (status.get('band') or {}).get('sigma_method', 'EWMA')
+            names = {'conditional': f'served: ±{k_:.2f}·σ_t (σ_t = {sig_m} volatility at day t)', 'conditional_1sigma': f'±1·σ_t, {sig_m} (uncalibrated)',
+                     'fixed': 'fixed width (same calibration, no volatility)',
+                     'conditional_ewma': 'previous served band: k·σ_t with EWMA volatility (same calibration)'}
             st.dataframe(pd.DataFrame({'Split': b['split'], 'Band': b['band'].map(lambda v: names.get(v, v)),
                                        'Days': b['n'], 'Actual inside band (nominal 68%)': b['coverage_pct'].map(lambda v: f"{v:.1f}%"),
                                        'Mean half-width': b['mean_sigma_pct'].map(lambda v: f"{v:.2f}%")}),
@@ -777,10 +831,16 @@ ensemble experiment, all scored on identical days. Models with a stopping rule (
 (no weights are fitted, so nothing is selected on the test set), and the combination is evaluated exactly like every single model — on the walk-forward
 folds and once on the unseen test set (row *Combined*). The best single model by validation ({cv_best}) is reported for comparison.
 
-**Uncertainty band.** Every forecast is shown with a 68 % band `P_t · exp(ŷ_t ± k·σ_t)`, where `σ_t` is the RiskMetrics EWMA volatility (λ = 0.94) of the returns
-up to day *t* — one of the model's own inputs, so it uses no future information — and `k` ({band_k_txt}) is the 68.27 % quantile of `|error| / σ_t` over the
+**Uncertainty band.** Every forecast is shown with a 68 % band `P_t · exp(ŷ_t ± k·σ_t)`, where `σ_t` is the one-day volatility known at day *t* — **{(status.get('band') or {}).get('sigma_method', 'EWMA')}** for {asset} (RiskMetrics EWMA, λ = 0.94, unless GARCH(1,1) or HAR beat it in the pre-registered validation comparison) — computed from the returns
+up to day *t* only, so it uses no future information — and `k` ({band_k_txt}) is the 68.27 % quantile of `|error| / σ_t` over the
 walk-forward errors of the training period. Daily returns are fat-tailed, so {cov1_txt} instead of 68 %.
 The band's coverage is reported on validation and test against the uncalibrated and a fixed-width band (Model Performance tab, `results/band_calibration.csv`).
+
+**Risk (volatility) forecast.** A second output forecasts the *size* of the coming moves: the realised volatility of the next 5 trading days.
+Candidates — persistence, EWMA, the HAR model (Corsi 2009), HAR + implied volatility (CBOE GVZ for the metals, lagged one day; Deribit DVOL for Bitcoin)
+and Ridge / LightGBM / CatBoost — were compared on the walk-forward folds under a rule written down before the run (`results/volatility/PREREGISTRATION.md`);
+the winner per asset is served and was then scored once on the unseen test set. Daily returns' direction is unpredictable, but volatility clusters, so this
+forecast has demonstrable skill.
 
 **Metrics.** MAE / RMSE / MAPE in USD (what a user sees); RMSE and R² of the return (what is actually predicted); directional accuracy on non-flat days with a
 binomial p-value against 50 % (and the share of UP calls, to expose drift); Diebold–Mariano test of squared errors against the random walk; a long/flat strategy

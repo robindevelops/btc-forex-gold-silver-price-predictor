@@ -1,0 +1,72 @@
+{
+  "asset": "Silver",
+  "task": "vol_5d",
+  "horizon_days": 5,
+  "target": "ln sqrt(mean r\u00b2 over the next 5 trading days)",
+  "method": "EWMA",
+  "served": true,
+  "decision": "step 1: lowest pooled RMSE among non-IV candidates (EWMA); step 2: HAR-IV not adopted (DM p vs EWMA on IV days = 0.670); step 3: vs Persistence DM p = 3.676e-12 \u2192 served",
+  "iv_series": null,
+  "regime_thresholds_daily_vol": [
+    0.011894120068898001,
+    0.017966932732157825
+  ],
+  "train_median_daily_vol": 0.014395920113550788,
+  "fit_period": [
+    "2018-03-29",
+    "2026-02-09"
+  ],
+  "walkforward": {
+    "asset": "Silver",
+    "candidate": "EWMA",
+    "days": "all out-of-fold",
+    "n": 1580,
+    "RMSE_log": 0.5126935461619819,
+    "RMSE_vs_ref_pct": -20.001354828531436,
+    "QLIKE": 0.5006843269108548,
+    "DM_stat": -7.003721358134126,
+    "DM_p": 3.675504345324043e-12
+  },
+  "test": {
+    "asset": "Silver",
+    "candidate": "EWMA",
+    "selected": true,
+    "served": true,
+    "n": 139,
+    "RMSE_log": 0.48829079373082673,
+    "RMSE_vs_ref_pct_vs_persistence": 0.8106984965072783,
+    "QLIKE": 0.3206475476921937,
+    "DM_stat_vs_persistence": 0.06779649750200166,
+    "DM_p_vs_persistence": 0.946045762305894,
+    "RMSE_vs_ref_pct_vs_ewma": 0.0,
+    "DM_p_vs_ewma": NaN
+  },
+  "test_ewma": {
+    "asset": "Silver",
+    "candidate": "EWMA",
+    "selected": true,
+    "served": true,
+    "n": 139,
+    "RMSE_log": 0.48829079373082673,
+    "RMSE_vs_ref_pct_vs_persistence": 0.8106984965072783,
+    "QLIKE": 0.3206475476921937,
+    "DM_stat_vs_persistence": 0.06779649750200166,
+    "DM_p_vs_persistence": 0.946045762305894,
+    "RMSE_vs_ref_pct_vs_ewma": 0.0,
+    "DM_p_vs_ewma": NaN
+  },
+  "test_persistence": {
+    "asset": "Silver",
+    "candidate": "Persistence",
+    "selected": false,
+    "served": false,
+    "n": 139,
+    "RMSE_log": 0.48436406156608885,
+    "RMSE_vs_ref_pct_vs_persistence": 0.0,
+    "QLIKE": 0.5209753266470196,
+    "DM_stat_vs_persistence": NaN,
+    "DM_p_vs_persistence": NaN,
+    "RMSE_vs_ref_pct_vs_ewma": -0.8041790292082629,
+    "DM_p_vs_ewma": 0.946045762305894
+  }
+}

@@ -40,6 +40,8 @@ from config import (PROCESSED_DATA_DIR, MODELS_DIR, RESULTS_DIR, SEQ_LEN, PREDIC
 from src.models.registry import load_trained, artefact_exists, TABULAR, RECURRENT
 from src.models.ensemble_model import StackedModel, stack_path
 from src.data.market_calendar import expected_last_complete_bar, next_trading_day
+from src.volatility.forecast import forecast_volatility_safe
+from src.volatility.band import band_sigma, band_rule, band_method
 from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -111,14 +113,16 @@ def _band_k(status):
     return float(k)
 
 
-def _band(feats, as_of_ts, last_close, r_hat, k):
-    """68 % price band for day t+1 from the volatility known at day t (unscaled feature value on row `as_of_ts`)."""
-    sigma = float(feats.loc[as_of_ts, BAND_SIGMA_FEATURE])
+def _band(asset, feats, as_of_ts, last_close, r_hat, k):
+    """68 % price band for day t+1 from the volatility known at day t (σ_t from src/volatility/band.py: the validated
+    method per asset — EWMA unless a candidate won the pre-registered comparison)."""
+    sigma = float(band_sigma(asset, feats.loc[:as_of_ts], [as_of_ts])[0])
     if not np.isfinite(sigma) or sigma <= 0:
-        raise ValueError(f"invalid {BAND_SIGMA_FEATURE} on {as_of_ts.date()}: {sigma}")
+        raise ValueError(f"invalid band volatility on {as_of_ts.date()}: {sigma}")
     half = k * sigma
     return {'uncertainty_band': [float(last_close * np.exp(r_hat - half)), float(last_close * np.exp(r_hat + half))],
-            'band_sigma_pct': sigma * 100, 'band_k': k, 'band_halfwidth_pct': half * 100, 'band_rule': BAND_RULE}
+            'band_sigma_pct': sigma * 100, 'band_k': k, 'band_halfwidth_pct': half * 100, 'band_rule': band_rule(asset),
+            'band_sigma_method': band_method(asset)}
 
 
 def _target_stats(asset):
@@ -203,16 +207,19 @@ def predict_next_day(asset, model_name=COMBINED):
     r_hat, members = _predict_from_window(asset, model_name, Xseq, Xt)
     pred_price = last_close * np.exp(r_hat)
     ctx = _context(asset, model_name, status)
+    live = _features_path(asset).endswith('_live_features.csv')
+    vol, vol_err = forecast_volatility_safe(asset, feats, as_of, live, (Xseq, Xt))
     result = {
         'asset': asset, 'as_of_date': str(as_of.date()), 'current_price': last_close,
         'target_date': str(next_trading_day(ASSET_CONFIG[asset]['type'], as_of)),
         'predicted_price': float(pred_price), 'predicted_return_pct': r_hat * 100,
         'direction': 'UP' if r_hat > 0 else 'DOWN', 'n_features': len(cols),
-        **_band(feats, as_of, last_close, r_hat, _band_k(status)), 'band_calibration': status.get('band'),
+        **_band(asset, feats, as_of, last_close, r_hat, _band_k(status)), 'band_calibration': status.get('band'),
         'data_source': 'live download' if _features_path(asset).endswith('_live_features.csv') else 'stored dataset',
         # False when a newer complete bar should already exist (sync the live data first): the forecast is then for an older day
         'data_is_current': bool(as_of.date() >= expected_last_complete_bar(ASSET_CONFIG[asset]['type'])),
         'individual': _individual(members, last_close), **ctx,
+        'volatility': vol, 'volatility_unavailable_reason': vol_err,
     }
     logger.info(f"{asset}: {model_name} as of {as_of.date()} close ${last_close:,.2f} → ${pred_price:,.2f} ({r_hat*100:+.2f}%)")
     return result
@@ -240,12 +247,13 @@ def predict_for_date(asset, as_of, model_name=COMBINED, progress=None):
     compute_seconds = time.perf_counter() - t_start
     pred_price = last_close * np.exp(r_hat)
     pos = feats.index.get_loc(as_of_ts)
+    vol, vol_err = forecast_volatility_safe(asset, feats, as_of_ts, not in_frozen, (Xseq, Xt))
     result = {
         'asset': asset, 'as_of_date': str(as_of_ts.date()), 'current_price': last_close,
         'predicted_price': float(pred_price), 'predicted_return_pct': r_hat * 100,
         'direction': 'UP' if r_hat > 0 else 'DOWN',
         'in_unseen_test_period': bool(as_of_ts >= pd.Timestamp(VAL_END)),
-        **_band(feats, as_of_ts, last_close, r_hat, _band_k(status)), 'band_calibration': status.get('band'),
+        **_band(asset, feats, as_of_ts, last_close, r_hat, _band_k(status)), 'band_calibration': status.get('band'),
         'actual_date': None, 'actual_price': None, 'actual_return_pct': None, 'error_usd': None, 'error_pct': None, 'direction_hit': None,
         'in_band': None, 'individual': _individual(members, last_close), **_context(asset, model_name, status),
         # provenance of this run: computed now, from data up to as_of only
@@ -254,6 +262,7 @@ def predict_for_date(asset, as_of, model_name=COMBINED, progress=None):
         'history_start': str(feats.index[0].date()), 'window_start': str(feats.index[max(pos - SEQ_LEN + 1, 0)].date()),
         'data_source': 'frozen dataset (stored test period)' if in_frozen else 'latest live download',
         'after_stored_test': not in_frozen,
+        'volatility': vol, 'volatility_unavailable_reason': vol_err,
     }
     if pos + 1 < len(feats):
         actual = float(feats['price'].iloc[pos + 1])

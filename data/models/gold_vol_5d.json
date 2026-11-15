@@ -1,0 +1,90 @@
+{
+  "asset": "Gold",
+  "task": "vol_5d",
+  "horizon_days": 5,
+  "target": "ln sqrt(mean r\u00b2 over the next 5 trading days)",
+  "method": "HAR-IV",
+  "served": true,
+  "decision": "step 1: lowest pooled RMSE among non-IV candidates (EWMA); step 2: HAR-IV beats it on 1580 IV days (DM p = 0.0451); step 3: vs Persistence DM p = 1.189e-09 \u2192 served",
+  "iv_series": "GVZ",
+  "regime_thresholds_daily_vol": [
+    0.006261414912461969,
+    0.009574347334874094
+  ],
+  "train_median_daily_vol": 0.007785891417424968,
+  "fit_period": [
+    "2018-03-29",
+    "2026-02-09"
+  ],
+  "walkforward": {
+    "asset": "Gold",
+    "candidate": "HAR-IV",
+    "days": "out-of-fold days with GVZ",
+    "n": 1580,
+    "RMSE_log": 0.46428098660701833,
+    "RMSE_vs_ref_pct": -22.560277575226063,
+    "QLIKE": 0.6142335175359847,
+    "DM_stat": -6.118421240586823,
+    "DM_p": 1.1894865092898499e-09
+  },
+  "test": {
+    "asset": "Gold",
+    "candidate": "HAR-IV",
+    "selected": true,
+    "served": true,
+    "n": 139,
+    "RMSE_log": 0.37422291499663646,
+    "RMSE_vs_ref_pct_vs_persistence": -25.70091167726598,
+    "QLIKE": 0.32002020362172506,
+    "DM_stat_vs_persistence": -3.437649087673457,
+    "DM_p_vs_persistence": 0.0007759603646262381,
+    "RMSE_vs_ref_pct_vs_ewma": -17.74730473828904,
+    "DM_p_vs_ewma": 0.09645931638436833
+  },
+  "test_ewma": {
+    "asset": "Gold",
+    "candidate": "EWMA",
+    "selected": false,
+    "served": false,
+    "n": 139,
+    "RMSE_log": 0.4549673585843443,
+    "RMSE_vs_ref_pct_vs_persistence": -9.669721963116483,
+    "QLIKE": 0.30706577722560624,
+    "DM_stat_vs_persistence": -1.0613500046082354,
+    "DM_p_vs_persistence": 0.29038479284514196,
+    "RMSE_vs_ref_pct_vs_ewma": 0.0,
+    "DM_p_vs_ewma": NaN
+  },
+  "test_persistence": {
+    "asset": "Gold",
+    "candidate": "Persistence",
+    "selected": false,
+    "served": false,
+    "n": 139,
+    "RMSE_log": 0.5036709378870424,
+    "RMSE_vs_ref_pct_vs_persistence": 0.0,
+    "QLIKE": 0.606690424793274,
+    "DM_stat_vs_persistence": NaN,
+    "DM_p_vs_persistence": NaN,
+    "RMSE_vs_ref_pct_vs_ewma": 10.704851322574438,
+    "DM_p_vs_ewma": 0.29038479284514196
+  },
+  "model": {
+    "with_iv": true,
+    "coef": [
+      -8.094894592164103,
+      0.012572974246797874,
+      -0.026668059314300344,
+      -0.033944801883540585,
+      1.0899603370433042
+    ],
+    "rv1_floor": 0.00043603049549243003,
+    "inputs": [
+      "1",
+      "ln rv_1d",
+      "ln rv_5d",
+      "ln rv_22d",
+      "ln IV"
+    ]
+  }
+}

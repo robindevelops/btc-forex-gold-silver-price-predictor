@@ -1,0 +1,5 @@
+{
+  "Bitcoin": "step 1: lowest pooled RMSE among non-IV candidates (Ridge); step 2: HAR-IV not adopted (DM p vs Ridge on IV days = 0.085); step 3: vs Persistence DM p = 2.887e-15 \u2192 served",
+  "Gold": "step 1: lowest pooled RMSE among non-IV candidates (EWMA); step 2: HAR-IV beats it on 1580 IV days (DM p = 0.0451); step 3: vs Persistence DM p = 1.189e-09 \u2192 served",
+  "Silver": "step 1: lowest pooled RMSE among non-IV candidates (EWMA); step 2: HAR-IV not adopted (DM p vs EWMA on IV days = 0.670); step 3: vs Persistence DM p = 3.676e-12 \u2192 served"
+}

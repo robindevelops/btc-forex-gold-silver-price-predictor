@@ -145,22 +145,26 @@
       "corr_pred_actual": 0.01769924739830427
     },
     "band": {
-      "rule": "68 % band P_t \u00b7 exp(r\u0302 \u00b1 k\u00b7\u03c3_t), \u03c3_t = ewma_vol at day t (RiskMetrics EWMA, \u03bb = 0.94), k calibrated on walk-forward errors of the training period",
-      "sigma_feature": "ewma_vol",
+      "rule": "68 % band P_t \u00b7 exp(r\u0302 \u00b1 k\u00b7\u03c3_t), \u03c3_t = GARCH(1,1) one-day volatility forecast at day t (parameters fitted on the training split), k calibrated on walk-forward errors of the training period",
+      "sigma_method": "GARCH(1,1)",
       "nominal_coverage_pct": 68.27,
-      "k": 0.8254766404172337,
-      "validation_conditional_coverage_pct": 60.62499999999999,
-      "validation_conditional_1sigma_coverage_pct": 75.0,
+      "k": 0.7485082744946682,
+      "validation_conditional_coverage_pct": 73.75,
+      "validation_conditional_1sigma_coverage_pct": 83.125,
       "validation_fixed_coverage_pct": 79.375,
-      "test_conditional_coverage_pct": 65.70048309178745,
-      "test_conditional_1sigma_coverage_pct": 73.91304347826086,
+      "validation_conditional_ewma_coverage_pct": 60.62499999999999,
+      "test_conditional_coverage_pct": 74.39613526570048,
+      "test_conditional_1sigma_coverage_pct": 81.64251207729468,
       "test_fixed_coverage_pct": 79.22705314009661,
-      "validation_conditional_qlike": 2.1535702769124074,
-      "validation_conditional_1sigma_qlike": 1.8748146252684876,
-      "validation_fixed_qlike": 1.936393914640926,
-      "test_conditional_qlike": 1.8577277829366734,
-      "test_conditional_1sigma_qlike": 1.7671144669809495,
-      "test_fixed_qlike": 1.7383544820052228
+      "test_conditional_ewma_coverage_pct": 65.70048309178745,
+      "validation_conditional_qlike": 1.8166861149219262,
+      "validation_conditional_1sigma_qlike": 1.798949059632082,
+      "validation_fixed_qlike": 1.9363939125526997,
+      "validation_conditional_ewma_qlike": 2.1535702732065074,
+      "test_conditional_qlike": 1.669597850249805,
+      "test_conditional_1sigma_qlike": 1.793706894817859,
+      "test_fixed_qlike": 1.7383544817942143,
+      "test_conditional_ewma_qlike": 1.85772778237343
     }
   },
   "Gold": {
@@ -308,8 +312,7 @@
       "corr_pred_actual": 0.04843268883854352
     },
     "band": {
-      "rule": "68 % band P_t \u00b7 exp(r\u0302 \u00b1 k\u00b7\u03c3_t), \u03c3_t = ewma_vol at day t (RiskMetrics EWMA, \u03bb = 0.94), k calibrated on walk-forward errors of the training period",
-      "sigma_feature": "ewma_vol",
+      "rule": "68 % band P_t \u00b7 exp(r\u0302 \u00b1 k\u00b7\u03c3_t), \u03c3_t = EWMA volatility (RiskMetrics, \u03bb = 0.94) at day t, k calibrated on walk-forward errors of the training period",
       "nominal_coverage_pct": 68.27,
       "k": 0.9088836717381992,
       "validation_conditional_coverage_pct": 66.05504587155964,
@@ -323,7 +326,8 @@
       "validation_fixed_qlike": 5.118581175993547,
       "test_conditional_qlike": 1.3876672450001397,
       "test_conditional_1sigma_qlike": 1.3919844955025487,
-      "test_fixed_qlike": 2.986858667506088
+      "test_fixed_qlike": 2.986858667506088,
+      "sigma_method": "EWMA"
     }
   },
   "Silver": {
@@ -474,8 +478,7 @@
       "corr_pred_actual": 0.01815355607521184
     },
     "band": {
-      "rule": "68 % band P_t \u00b7 exp(r\u0302 \u00b1 k\u00b7\u03c3_t), \u03c3_t = ewma_vol at day t (RiskMetrics EWMA, \u03bb = 0.94), k calibrated on walk-forward errors of the training period",
-      "sigma_feature": "ewma_vol",
+      "rule": "68 % band P_t \u00b7 exp(r\u0302 \u00b1 k\u00b7\u03c3_t), \u03c3_t = EWMA volatility (RiskMetrics, \u03bb = 0.94) at day t, k calibrated on walk-forward errors of the training period",
       "nominal_coverage_pct": 68.27,
       "k": 0.870083436691348,
       "validation_conditional_coverage_pct": 54.12844036697248,
@@ -489,7 +492,8 @@
       "validation_fixed_qlike": 10.132319031817014,
       "test_conditional_qlike": 1.5490467346303638,
       "test_conditional_1sigma_qlike": 1.5884343450954557,
-      "test_fixed_qlike": 2.9453386625581524
+      "test_fixed_qlike": 2.9453386625581524,
+      "sigma_method": "EWMA"
     }
   }
 }

@@ -19,6 +19,7 @@ from config import PROCESSED_DATA_DIR, RAW_LIVE_DIR, MODELS_DIR, ASSET_CONFIG, D
 from src.data.preprocessing import DataCleaner
 from src.data.data_collection import fetch_asset
 from src.data.external_data import fetch_all_external_data
+from src.volatility.implied_vol import fetch_all as fetch_implied_vol
 
 # external series each asset type's features are built from (keys of fetch_all_external_data's result; see DataCleaner.add_external_features)
 REQUIRED_EXTERNAL = {'crypto': ('SP500', 'VIX', 'FearGreed'),
@@ -44,6 +45,9 @@ def update_live_data(asset_name, refresh_external=True):
     os.makedirs(RAW_LIVE_DIR, exist_ok=True)
     try:
         if refresh_external:
+            # implied volatility for the risk forecast (GVZ / DVOL). Optional: a failure only disables the volatility
+            # forecast (it refuses to use a stale value) and never blocks the price forecast.
+            fetch_implied_vol(out_dir=RAW_LIVE_DIR)
             ext = fetch_all_external_data(out_dir=RAW_LIVE_DIR) or {}
             failed = [s for s in REQUIRED_EXTERNAL[ASSET_CONFIG[asset_name]['type']] if ext.get(s) is None or ext[s].empty]
             if failed:

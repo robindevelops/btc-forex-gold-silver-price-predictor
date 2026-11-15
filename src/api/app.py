@@ -60,6 +60,8 @@ class PredictionResponse(BaseModel):
     data_source: Optional[str] = None
     data_is_current: Optional[bool] = None              # False → a newer complete bar should exist: run the live sync (dashboard) first
     test_metrics: Dict[str, Any] = {}
+    volatility: Optional[Dict[str, Any]] = None          # risk forecast: expected average daily move over the next 5 trading days
+    volatility_unavailable_reason: Optional[str] = None
     disclaimer: str
 
 

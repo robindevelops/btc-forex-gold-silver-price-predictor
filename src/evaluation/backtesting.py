@@ -48,7 +48,8 @@ from src.models.registry import (make_model, load_trained, artefact_exists, roll
 from src.models.ensemble_model import StackedModel, stack_path
 from src.evaluation.cross_validation import cv_evaluate, summarise_folds
 from src.utils.metrics import evaluate_task, band_calibration, diebold_mariano, directional_accuracy, rmse
-from src.inference.prediction import BAND_SIGMA_FEATURE, BAND_RULE, BAND_NOMINAL
+from src.inference.prediction import BAND_NOMINAL
+from src.volatility.band import band_sigma, band_rule, band_method
 from src.utils.logging_config import get_logger, setup_logging
 
 setup_logging()
@@ -146,7 +147,9 @@ def pooled_walkforward(asset, data, member_oof):
 
 def band_rows(asset, data, pred_df, oof):
     """
-    Calibration of the served 68 % band, P_t·exp(r̂ ± k·σ_t), σ_t = `ewma_vol` at day t.
+    Calibration of the served 68 % band, P_t·exp(r̂ ± k·σ_t), σ_t = the asset's validated band volatility at day t
+    (src/volatility/band.py: EWMA, or GARCH(1,1) / HAR-1d where it won the pre-registered comparison, #2). When σ_t is not
+    the EWMA, a fourth row 'conditional_ewma' scores the original EWMA band (calibrated the same way) for comparison.
 
     k is fitted ONCE on the walk-forward out-of-fold Combined errors whose target lies in the TRAINING split:
         k = 68.27 % quantile of |r − r̂| / σ_t.
@@ -164,7 +167,8 @@ def band_rows(asset, data, pred_df, oof):
     n_tr = len(data['y_train'])
     dates_all = np.concatenate([data['dates_train'], data['dates_val']])[idx]
     y_all = np.concatenate([data['y_real_train'], data['y_real_val']])[idx]
-    sig_all = f[BAND_SIGMA_FEATURE].reindex(dates_all).values
+    sig_all = band_sigma(asset, f, dates_all)                       # the validated σ_t (src/volatility/band.py; EWMA by default)
+    ewma_all = band_sigma(asset, f, dates_all, method='EWMA')
     fit = idx < n_tr                                                 # out-of-fold days of the training split → calibration
     err = np.abs(y_all - pred)
     k = float(np.quantile(err[fit] / sig_all[fit], BAND_NOMINAL))
@@ -172,11 +176,18 @@ def band_rows(asset, data, pred_df, oof):
     log.info(f"  band calibration on {int(fit.sum())} training-split out-of-fold days: k = {k:.3f}, fixed half-width = {w * 100:.2f}%")
     rows = []
     va = ~fit                                                        # out-of-fold days of the validation split → out-of-sample check
-    for name, s in (('conditional', k * sig_all[va]), ('conditional_1sigma', sig_all[va]), ('fixed', np.full(int(va.sum()), w))):
+    k_ewma = float(np.quantile(err[fit] / ewma_all[fit], BAND_NOMINAL))
+    cands = [('conditional', k * sig_all[va]), ('conditional_1sigma', sig_all[va]), ('fixed', np.full(int(va.sum()), w))]
+    if band_method(asset) != 'EWMA':                                 # the original EWMA band, same calibration, for comparison
+        cands.append(('conditional_ewma', k_ewma * ewma_all[va]))
+    for name, s in cands:
         rows.append({'asset': asset, 'split': 'validation', 'band': name, 'k': k, **band_calibration(y_all[va], pred[va], s)})
     y, r = pred_df['actual_return'].values, pred_df[f'pred_return_{COMBINED}'].values
-    sig_c = f[BAND_SIGMA_FEATURE].reindex(pred_df['date']).values
-    for name, s in (('conditional', k * sig_c), ('conditional_1sigma', sig_c), ('fixed', np.full(len(y), w))):
+    sig_c = band_sigma(asset, f, pred_df['date'])
+    cands = [('conditional', k * sig_c), ('conditional_1sigma', sig_c), ('fixed', np.full(len(y), w))]
+    if band_method(asset) != 'EWMA':
+        cands.append(('conditional_ewma', k_ewma * band_sigma(asset, f, pred_df['date'], method='EWMA')))
+    for name, s in cands:
         rows.append({'asset': asset, 'split': 'test', 'band': name, 'k': k, **band_calibration(y, r, s)})
     pred_df['sigma_t'] = sig_c
     pred_df[f'band_lo_{COMBINED}'] = pred_df['prev_close'] * np.exp(r - k * sig_c)
@@ -309,7 +320,7 @@ def main():
             'params': get_params(best['model'], asset), 'fit_info': infos.get(best['model'], {}),
             'features': data['columns'], 'target_mean': data['target_mean'], 'target_std': data['target_std'],
             'combined_walkforward_pooled': next((clean(r) for r in pooled if r['model'] == COMBINED), None),
-            'band': {'rule': BAND_RULE, 'sigma_feature': BAND_SIGMA_FEATURE, 'nominal_coverage_pct': BAND_NOMINAL * 100, 'k': band_k,
+            'band': {'rule': band_rule(asset), 'sigma_method': band_method(asset), 'nominal_coverage_pct': BAND_NOMINAL * 100, 'k': band_k,
                      **{f"{r['split']}_{r['band']}_coverage_pct": r['coverage_pct'] for r in b_rows},
                      **{f"{r['split']}_{r['band']}_qlike": r['qlike'] for r in b_rows}},
         }

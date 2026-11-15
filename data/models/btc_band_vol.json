@@ -1,0 +1,58 @@
+{
+  "asset": "Bitcoin",
+  "sigma": "GARCH(1,1)",
+  "k": 0.7485082744946691,
+  "decision": "GARCH(1,1) replaces EWMA (validation QLIKE 1.7989 vs 1.8748, coverage 73.8% vs 60.6%)",
+  "har_1d": {
+    "coef": [
+      0.0007494910152061299,
+      0.0323686542584907,
+      0.06482776290489795,
+      0.23707347926034758
+    ],
+    "floor": 6.693051115866949e-08,
+    "inputs": [
+      "1",
+      "rv_1d\u00b2",
+      "rv_5d\u00b2",
+      "rv_22d\u00b2"
+    ]
+  },
+  "garch": {
+    "omega_pct2": 0.6462673677081492,
+    "alpha": 0.10397558740769827,
+    "beta": 0.847869933047791,
+    "var0_pct2": 11.677115374670535,
+    "persistence": 0.9518455204554893,
+    "converged": true
+  },
+  "k_all": {
+    "EWMA": 0.8254766408931751,
+    "HAR-1d": 0.7299210587320848,
+    "GARCH(1,1)": 0.7485082744946691
+  },
+  "validation": {
+    "asset": "Bitcoin",
+    "sigma": "GARCH(1,1)",
+    "split": "validation",
+    "k": 0.7485082744946691,
+    "n": 160,
+    "coverage_pct": 73.75,
+    "coverage_error_pp": 5.480000000000004,
+    "qlike_sigma": 1.798949059632093,
+    "mean_halfwidth_pct": 2.1227706578271737,
+    "selected": true
+  },
+  "test": {
+    "asset": "Bitcoin",
+    "sigma": "GARCH(1,1)",
+    "split": "test",
+    "k": 0.7485082744946691,
+    "n": 207,
+    "coverage_pct": 74.39613526570048,
+    "coverage_error_pp": 6.1261352657004835,
+    "qlike_sigma": 1.793706894817859,
+    "mean_halfwidth_pct": 2.020145130289473,
+    "selected": true
+  }
+}

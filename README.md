@@ -10,7 +10,7 @@
 2. Engineers **stationary, backward-looking features** (returns and 20-day momentum, rolling/HAR/EWMA volatility, RSI/ADX/ROC, normalised MACD, EMA ratios, Bollinger %B/width, ATR/price, macro returns, sentiment) under a **close-time rule**: a feature may only use what is known when the asset's daily close is fixed — same-day macro values for Bitcoin (00:00 UTC bar), previous-day values for the metals (13:30 ET COMEX settlement) (the feature dictionary is Table 8 of `docs/FYP_Technical_Report.pdf`).
 3. Predicts the **next-day log return** `y = ln(P_{t+1}/P_t)` and converts it to a price.
 4. Compares **Naive (random walk), historical-mean drift, ARIMA, two moving-average rules (5-day average price, 20-day mean return), Ridge, Random Forest, LightGBM, CatBoost, GRU, LSTM and a stacked ensemble** on identical days under **expanding-window walk-forward validation**, tunes hyper-parameters on validation only, and evaluates the held-out test set in a single evaluation script with return-space metrics, directional accuracy with significance, a Diebold–Mariano test against the random walk, and a strategy backtest.
-5. Serves one **combined forecast** — the equal-weight mean of all six trained models, so the user never picks a model — in a **Streamlit dashboard** (Run prediction with a **live scorecard of every model on the most recent days**, **Predict-a-Day demo on the unseen test period**, performance and methodology tabs) and a **FastAPI** endpoint, always alongside its held-out metrics, a **calibrated, conditional 68 % band** (`P_t·exp(r̂ ± k·σ_t)`, σ_t = EWMA volatility at the last complete bar — the one quantity this data does predict — and k ≈ 0.83–0.91 calibrated on training-period walk-forward errors) and a disclaimer.
+5. Serves one **combined forecast** — the equal-weight mean of all six trained models, so the user never picks a model — in a **Streamlit dashboard** (Run prediction with a **live scorecard of every model on the most recent days**, **Predict-a-Day demo on the unseen test period**, performance and methodology tabs) and a **FastAPI** endpoint, always alongside its held-out metrics, a **calibrated, conditional 68 % band** (`P_t·exp(r̂ ± k·σ_t)`, σ_t = the one-day volatility known at the last complete bar — GARCH(1,1) for Bitcoin, EWMA for Gold and Silver, chosen by a pre-registered validation comparison — with k ≈ 0.75–0.91 calibrated on training-period walk-forward errors), a **risk forecast** (next 5 trading days' volatility, see below) and a disclaimer.
 6. Logs design experiments — data size, feature ablation, horizon, volatility target, the final-audit candidates (ensemble membership, de-duplicated features, zero-drift forecast) and the submission-audit candidates (volatility-scaled target, robust Huber loss) — and a before/after comparison on identical unseen days (`results/experiments/`).
 
 The central research question is honest: *does any model beat the random walk at a one-day horizon, and by how much?* Answer (`docs/FYP_Technical_Report.pdf` §14–15): **no — not for Bitcoin, Gold or Silver.** The served combined forecast's return-RMSE is within ±0.3 % of the random walk's on the unseen 2026 test window (Diebold–Mariano p = 0.46–0.97), directional accuracy 47–54 % (none significant); no single model does better. The same holds on **all ≈ 6 years of walk-forward out-of-fold predictions pooled together** (1,584–2,328 days per asset, ten times the test window): Combined vs random walk −0.02 % / −0.21 % / −0.06 % RMSE, DM p = 0.87 / 0.09 / 0.69, and the metals' 52–53 % direction hit-rates are below the "always UP" drift forecast's 53.5–55.8 % (`results/walkforward_pooled.csv`). An intermediate version reported 62 % for Silver; the final audit traced it to a close-time leak (same-day macro features against a 13:30 ET futures settlement), fixed it and re-ran everything (`docs/FYP_Technical_Report.pdf` §11 and §15.2).
@@ -61,6 +61,27 @@ Reading: every error metric is within ±0.4 % of the random walk (no difference 
 **Submission audit (2026-10-10):** `FINAL_SUBMISSION_REPORT.md` — verdict, what was fixed, the baseline comparison, test record, run instructions and viva answers.
 
 **Final report:** `docs/FYP_Technical_Report.pdf` — the complete technical report (data, features, models, evaluation, dashboard, limitations); every table in it was generated from the result files (the "UP calls" column above was added in the final audit and is not in the PDF's tables).
+
+### Risk (volatility) forecast — where the data does have skill
+
+The direction of tomorrow's move is unpredictable with this data, but its *size* is not (volatility clusters). A second output forecasts
+the realised volatility of the next 5 trading days. Candidates — persistence, EWMA, HAR (Corsi 2009), HAR + implied volatility
+(free: **CBOE GVZ** for the metals, lagged one day; **Deribit DVOL** for Bitcoin, from 2021), Ridge, LightGBM, CatBoost — were compared
+on the walk-forward folds under rules written down before the run (`results/volatility/PREREGISTRATION.md`); the test set was read once
+afterwards (`results/volatility/VOLATILITY_RESULTS.md`).
+
+| Asset | Served forecast (chosen on walk-forward) | Walk-forward vs persistence | **Unseen test vs persistence** (DM p) | Test vs EWMA (DM p) |
+|---|---|--:|--:|--:|
+| Bitcoin | Ridge on the 29 features | −19.5 % | **−24.0 %** (0.026) | −11.1 % (0.014) |
+| Gold | HAR + GVZ implied volatility | −22.6 % | **−25.7 %** (0.0008) | −17.7 % (0.097) |
+| Silver | EWMA (no model beat it on walk-forward) | −20.0 % | **+0.8 %** (0.95) — no gain on the test window | — |
+
+RMSE of log volatility. For Silver, HAR + GVZ was better on the test window (−28 %) but was not the walk-forward choice, so it is not
+served — choosing it now would be test-set selection.
+
+**Band (#2).** GARCH(1,1) and HAR were tested against the EWMA σ_t of the 68 % band. GARCH replaced EWMA for Bitcoin (validation coverage
+73.8 % vs 60.6 %, lower QLIKE). On the test set this did **not** hold: coverage 74.4 % vs 65.7 % for the old EWMA band (nominal 68.3 %)
+and slightly worse QLIKE. EWMA stayed for Gold and Silver.
 
 ## Project structure
 
@@ -113,6 +134,7 @@ make tune           # walk-forward hyper-parameter search  (~30 min; GRU/LSTM do
 make train          # two-phase training of all models
 make stack          # stacked-ensemble experiment
 make evaluate       # the single test-set evaluation + model selection
+make volatility     # risk forecast + band volatility (pre-registered selection, results/volatility/)
 make figures        # report figures
 make experiments    # design experiments + before/after comparison (validation only)
 make test           # test suite

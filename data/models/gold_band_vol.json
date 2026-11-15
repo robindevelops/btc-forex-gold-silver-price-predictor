@@ -1,0 +1,58 @@
+{
+  "asset": "Gold",
+  "sigma": "EWMA",
+  "k": 0.9088836712008241,
+  "decision": "no candidate beats EWMA on both validation QLIKE and coverage \u2192 EWMA stays: EWMA QLIKE 2.0395, coverage 66.1%; HAR-1d QLIKE 2.0986, coverage 63.3%; GARCH(1,1) QLIKE 2.1510, coverage 61.5%",
+  "har_1d": {
+    "coef": [
+      3.214959290365928e-05,
+      0.03930802417286211,
+      0.11043182990631817,
+      0.514343102045359
+    ],
+    "floor": 1e-08,
+    "inputs": [
+      "1",
+      "rv_1d\u00b2",
+      "rv_5d\u00b2",
+      "rv_22d\u00b2"
+    ]
+  },
+  "garch": {
+    "omega_pct2": 0.03311522515862014,
+    "alpha": 0.056863748805028695,
+    "beta": 0.9071980269636883,
+    "var0_pct2": 0.9461050684272241,
+    "persistence": 0.964061775768717,
+    "converged": true
+  },
+  "k_all": {
+    "EWMA": 0.9088836712008241,
+    "HAR-1d": 0.8846334229069335,
+    "GARCH(1,1)": 0.8796192030103354
+  },
+  "validation": {
+    "asset": "Gold",
+    "sigma": "EWMA",
+    "split": "validation",
+    "k": 0.9088836712008241,
+    "n": 109,
+    "coverage_pct": 66.05504587155964,
+    "coverage_error_pp": 2.214954128440354,
+    "qlike_sigma": 2.03948837170279,
+    "mean_halfwidth_pct": 1.4312652957627843,
+    "selected": true
+  },
+  "test": {
+    "asset": "Gold",
+    "sigma": "EWMA",
+    "split": "test",
+    "k": 0.9088836712008241,
+    "n": 143,
+    "coverage_pct": 69.23076923076923,
+    "coverage_error_pp": 0.9607692307692304,
+    "qlike_sigma": 1.391984495502547,
+    "mean_halfwidth_pct": 1.6766701329633444,
+    "selected": true
+  }
+}

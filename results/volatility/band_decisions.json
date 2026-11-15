@@ -1,0 +1,5 @@
+{
+  "Bitcoin": "GARCH(1,1) replaces EWMA (validation QLIKE 1.7989 vs 1.8748, coverage 73.8% vs 60.6%)",
+  "Gold": "no candidate beats EWMA on both validation QLIKE and coverage \u2192 EWMA stays: EWMA QLIKE 2.0395, coverage 66.1%; HAR-1d QLIKE 2.0986, coverage 63.3%; GARCH(1,1) QLIKE 2.1510, coverage 61.5%",
+  "Silver": "no candidate beats EWMA on both validation QLIKE and coverage \u2192 EWMA stays: EWMA QLIKE 1.9363, coverage 54.1%; HAR-1d QLIKE 2.1610, coverage 50.5%; GARCH(1,1) QLIKE 2.0828, coverage 50.5%"
+}

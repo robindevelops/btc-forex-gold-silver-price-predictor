@@ -137,8 +137,10 @@ def load_features_cols(asset):
 
 @pytest.mark.skipif(not os.path.exists(os.path.join(MODELS_DIR, 'model_status.json')), reason="models not trained")
 def test_uncertainty_band_is_conditional_calibrated_and_uses_only_day_t_volatility():
-    """The 68 % band is P_t·exp(r̂ ± k·σ_t): σ_t = the EWMA-volatility feature on the forecast day (no future rows), k = the
-    multiplier calibrated by the evaluation script on training-split walk-forward errors (fat tails → k < 1)."""
+    """The 68 % band is P_t·exp(r̂ ± k·σ_t): σ_t = the asset's validated band volatility (src/volatility/band.py: EWMA unless a
+    candidate won the pre-registered comparison) on the forecast day, computed from rows up to that day only; k = the multiplier
+    calibrated by the evaluation script on training-split walk-forward errors (fat tails → k < 1)."""
+    from src.volatility.band import band_sigma
     import src.inference.prediction as pr
     from config import load_model_status
     k = load_model_status()['Silver']['band']['k']
@@ -148,7 +150,8 @@ def test_uncertainty_band_is_conditional_calibrated_and_uses_only_day_t_volatili
     sig = []
     for day in days:
         r = pr.predict_for_date('Silver', str(day.date()))
-        s = f.loc[day, pr.BAND_SIGMA_FEATURE]
+        s = band_sigma('Silver', f.loc[:day], [day])[0]
+        assert np.isclose(s, band_sigma('Silver', f, [day])[0])            # future rows do not change σ_t
         assert np.isclose(r['band_sigma_pct'], s * 100) and np.isclose(r['band_k'], k)
         lo, hi = r['uncertainty_band']
         rh = r['predicted_return_pct'] / 100
