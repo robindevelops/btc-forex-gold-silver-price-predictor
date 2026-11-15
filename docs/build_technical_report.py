@@ -1382,9 +1382,9 @@ def build():
             f'{ct["Bitcoin"]["DirAcc_pct"]:.1f} / {ct["Gold"]["DirAcc_pct"]:.1f} / {ct["Silver"]["DirAcc_pct"]:.1f} % and Diebold–Mariano p = {ct["Bitcoin"]["DM_pvalue"]:.2f} / {ct["Gold"]["DM_pvalue"]:.2f} / {ct["Silver"]["DM_pvalue"]:.2f}: '
             'no model, single or combined, beats the random walk at a one-day horizon in this data — confirmed on ≈ 6 years of pooled walk-forward predictions and on the days published after the data were frozen. The project\'s value is a correct, tested, transparent and reproducible pipeline that reports that result honestly — '
             'including the discovery and correction of a close-time data leak that had produced an apparently significant 62 % result. '
-            '<b>Risk forecast →</b> the volatility of the next 5 trading days <i>is</i> predictable: the served forecast beats persistence on unseen days by '
-            + ' / '.join(f"{-volsel(a)[0]['RMSE_vs_ref_pct_vs_persistence']:.1f} %" for a in ASSETS) + ' (Bitcoin / Gold / Silver; DM p = '
-            + ' / '.join(f"{volsel(a)[0]['DM_p_vs_persistence']:.3f}" for a in ASSETS) + ').')]
+            '<b>Risk forecast →</b> the volatility of the next 5 trading days <i>is</i> predictable: on unseen days the served forecast changes the error relative to persistence by '
+            + ' / '.join(f"{volsel(a)[0]['RMSE_vs_ref_pct_vs_persistence']:+.1f} %" for a in ASSETS) + ' (Bitcoin / Gold / Silver; DM p = '
+            + ' / '.join(f"{volsel(a)[0]['DM_p_vs_persistence']:.3f}" for a in ASSETS) + ') — significant for Bitcoin and Gold, no gain for Silver.')]
     F += [Spacer(1, 10), P('<i>End of report. Regenerate with</i> <font name="Mono">python docs/build_technical_report.py</font>; <i>all tables are produced from the result files at build time.</i>', 'small')]
     return F
 
