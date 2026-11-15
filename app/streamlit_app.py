@@ -300,7 +300,7 @@ with tab_fc:
                 else:
                     regime_col = {'low': '#2ECC71', 'normal': '#F1C40F', 'high': '#FF5252'}[vol['regime']]
                     method_txt = {'Ridge': 'Ridge regression on the 29 features', 'HAR-IV': 'HAR model + implied volatility (GVZ)',
-                                  'HAR': 'HAR model', 'EWMA': 'EWMA volatility (simple rule — no ML model beat it)',
+                                  'HAR': 'HAR model', 'EWMA': 'EWMA volatility (simple rule)',
                                   'LightGBM': 'LightGBM', 'CatBoost': 'CatBoost', 'Persistence': 'last 5 days\' volatility'}.get(vol['method'], vol['method'])
                     v1, v2, v3 = st.columns(3)
                     v1.metric("Expected daily move", f"±{vol['daily_vol_pct']:.2f}%",
@@ -317,8 +317,11 @@ with tab_fc:
                                    f"(Diebold–Mariano p = {t_['DM_p_vs_persistence']:.3f}) and {abs(t_['RMSE_vs_ref_pct_vs_ewma']):.0f}% more accurate than the EWMA "
                                    f"rule (p = {t_['DM_p_vs_ewma']:.3f}). Unlike the direction of tomorrow's move, the size of the coming moves is predictable.")
                     else:
-                        st.caption(f"Method: **{method_txt}**. For {asset} no machine-learning volatility model beat this simple rule in walk-forward "
-                                   "validation, so the rule is shown — honestly labelled. Details: Model Performance tab.")
+                        st.caption(f"Method: **{method_txt}**. For {asset} no model beat this simple rule by a statistically significant margin in "
+                                   "walk-forward validation, so the rule is shown — honestly labelled. On the unseen test days it was "
+                                   + (f"{abs(t_['RMSE_vs_ref_pct_vs_persistence']):.1f}% {'better' if t_['RMSE_vs_ref_pct_vs_persistence'] < 0 else 'worse'} than "
+                                      "\"same volatility as the last 5 days\"" if t_.get('RMSE_vs_ref_pct_vs_persistence') is not None else 'not scored')
+                                   + ". Details: Model Performance tab.")
 
                 # each model's prediction for tomorrow + its live scorecard on the most recent days
                 st.markdown("#### Each model: tomorrow's prediction and how it did on the most recent days — calculated live")
@@ -753,8 +756,9 @@ with tab_perf:
                 'DM p': vta['DM_p_vs_persistence'].map(lambda v: '—' if pd.isna(v) else f"{v:.3f}"),
                 'vs EWMA': vta['RMSE_vs_ref_pct_vs_ewma'].map(lambda v: f"{v:+.1f}%"),
                 'DM p (vs EWMA)': vta['DM_p_vs_ewma'].map(lambda v: '—' if pd.isna(v) else f"{v:.3f}")}), width='stretch', hide_index=True)
-            vwa = vw[(vw['asset'] == asset) & (vw['days'] == 'all out-of-fold')].sort_values('RMSE_log')
-            best_wf = vwa.iloc[0]
+            # walk-forward evidence of the SERVED candidate (HAR-IV is scored on the days where its implied-volatility series exists)
+            vwa = vw[(vw['asset'] == asset) & (vw['candidate'] == chosen)]
+            best_wf = (vwa[vwa['days'] != 'all out-of-fold'] if chosen == 'HAR-IV' else vwa[vwa['days'] == 'all out-of-fold']).iloc[0]
             st.caption(f"Unseen test set ({int(vta['n'].iloc[0])} days), target = volatility of the next 5 trading days. The served forecast "
                        f"(**{chosen}**) was chosen BEFORE the test set was read, by the rule in `results/volatility/PREREGISTRATION.md`, on "
                        f"{int(best_wf['n']):,} walk-forward days where it was {abs(best_wf['RMSE_vs_ref_pct']):.0f}% better than persistence. "
