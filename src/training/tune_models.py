@@ -29,7 +29,7 @@ from src.utils.logging_config import setup_logging
 setup_logging()
 log = get_logger(__name__)
 
-# Small, deliberate grids: the data set is small (~500-900 training windows), so the
+# Small, deliberate grids: the data set is small (~1,900–2,800 training windows from 2018), so the
 # search is over regularisation strength rather than capacity.
 GRIDS = {
     'Ridge': {'alpha': [0.1, 1.0, 10.0, 100.0]},

@@ -1,9 +1,10 @@
 """
 GRU model for next-day log-return prediction.
 
-A single GRU layer with dropout. The number of units is a tuned hyper-parameter
-(32 or 64 in the walk-forward search); with ~500–700 training windows a deeper
-2×100-unit stack (~130k parameters) over-fitted badly in the original experiments.
+A single GRU layer (32 units) with dropout; the dropout rate is the tuned hyper-parameter
+(0.2 or 0.4 in the walk-forward search, src/training/tune_models.py). A deeper 2×100-unit stack
+(~130k parameters) over-fitted badly in the original experiments (then ~500–700 training windows;
+the final dataset has ~1,900–2,800).
 """
 import tensorflow as tf
 from tensorflow.keras.models import Sequential

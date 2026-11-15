@@ -26,7 +26,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI-Powered Commodity Price Predictor API — Gold, Silver & Bitcoin", version="2.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# Public read-only API with no cookies/auth: any origin may call it, so credentials are off (the CORS spec forbids a
+# wildcard origin together with credentials).
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["GET"], allow_headers=["*"])
 
 
 class MemberPrediction(BaseModel):
